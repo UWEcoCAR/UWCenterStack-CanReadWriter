@@ -11,4 +11,4 @@ alias uwcs-crw-rebuild='cd $UWCENTERSTACK_CANREADWRITER_HOME && npm build .'
 alias uwcs-crw-test='cd $UWCENTERSTACK_CANREADWRITER_HOME && node test.js'
 
 # uwcs-crw-publish - Pushes the package to npm
-alias uwcs-crw-test='cd $UWCENTERSTACK_CANREADWRITER_HOME && npm publish'
+alias uwcs-crw-publish='cd $UWCENTERSTACK_CANREADWRITER_HOME && npm version patch && npm publish'

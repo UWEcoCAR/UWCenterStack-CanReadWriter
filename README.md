@@ -13,12 +13,12 @@ export UWCENTERSTACK_CANREADWRITER_HOME=path/to/UWCenterStack-CanReadWriter <-- 
 source $UWCENTERSTACK_CANREADWRITER_HOME/shellCommands.sh
 ```
 
+#### Publishing
 To publish, setup credentials with (using the credentials from the Google Doc):
 ```
 uwcs-crw && npm adduser
 ```
-
-and then run
+Then update the version number in `package.json` and run:
 
 ```
 uwcs-crw-publish
