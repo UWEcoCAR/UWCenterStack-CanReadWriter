@@ -13,6 +13,13 @@ export UWCENTERSTACK_CANREADWRITER_HOME=path/to/UWCenterStack-CanReadWriter <-- 
 source $UWCENTERSTACK_CANREADWRITER_HOME/shellCommands.sh
 ```
 
+#### Compiling
+To recompile the c++, run:
+```
+uwcs-crw-rebuild
+```
+
+
 #### Publishing
 To publish, setup credentials with (using the credentials from the Google Doc):
 ```
