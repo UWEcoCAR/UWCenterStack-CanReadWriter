@@ -6,30 +6,32 @@
 
 using namespace v8;
 
-// Multiplies the two args together
-Handle<Value> Multiply(const Arguments& args) {
-    // At the top of every function that uses anything about v8, include a
-    // definition like this. It ensures that any v8 handles you create in that
-    // function are properly cleaned up. If you see memory rising in your
-    // application, chances are that a scope isn't properly cleaned up.
-    HandleScope scope;
+// This funtion will be called when a competition message has been read.
+// Right now, this just represents an example in which a callback is made with
+// parameters "voltage" and value 5. Please see the CanReadWriter.js for how these
+// parameters come into play.
+Handle<Value> ReadResult(const Arguments& args) {
+  HandleScope scope;
 
-    // When returning a value from a function, make sure to wrap it in
-    // scope.Close(). This ensures that the handle stays valid after the current
-    // scope (declared with the previous statement) is cleaned up.
-    return scope.Close(
-        // Creating a new JavaScript integer is as simple as passing a C int
-        // (technically a int32_t) to this function.
-        Integer::New(args[0]->ToInteger()->Value() * args[1]->ToInteger()->Value())
-    );
+  Local<Function> callback = Local<Function>::Cast(args[0]);
+
+  const unsigned argc = 2; //two parameters for callback function
+  Local<Value> argv[argc] = {
+    Local<Value>::New(String::New("voltage")),
+    Local<Value>::New(Integer::New(5))
+  };
+
+  callback->Call(Context::GetCurrent()->Global(), argc, argv);
+  return Undefined();
 }
 
-void RegisterModule(Handle<Object> target) {
-    srand(time(NULL));
+// this is the initialization function that will be called for the module
+// this is where we need to start the threads for reading
+void init(Handle<Object> target) {
 
     // target is the module object you see when require()ing the .node file.
-    target->Set(String::NewSymbol("multiply"),
-        FunctionTemplate::New(Multiply)->GetFunction());
+    target->Set(String::NewSymbol("readResult"),
+        FunctionTemplate::New(ReadResult)->GetFunction());
 }
 
-NODE_MODULE(canReadWriter, RegisterModule);
+NODE_MODULE(canReadWriter, init);
