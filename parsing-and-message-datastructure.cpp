@@ -13,15 +13,15 @@ struct signalDef {
 	    int length;
 	    double scale;
 	    int offset;
-	    string identifier;
+	    string unitId;
 
-	    signalDef(string nameSig, int startInt, int lengthInt, double scaleInt, int offsetInt, string unitId) : 
+	    signalDef(string nameSig, int startInt, int lengthInt, double scaleInt, int offsetInt, string ID) : 
 	    name(nameSig), 
 	    startBit(startInt), 
 	    length(lengthInt), 
 	    scale(scaleInt), 
 	    offset(offsetInt), 
-	    identifier(unitId)  { }
+	    unitId(ID)  { }
 };
 
 // Define signalMap data structure
@@ -78,7 +78,7 @@ void parse(signalMap m, unsigned long id, unsigned char message[], unsigned int 
 		signal = signal + ourSignal.offset;
 		cout <<" Signal "<< ourSignal.name <<":  Start Bit- " <<ourSignal.startBit<<"  Length Bit- "<< ourSignal.length
 		<< "  Scale- "<< ourSignal.scale <<"  Offset- " << ourSignal.offset
-		<< " Signal- " << signal << " " << ourSignal.identifier <<endl;
+		<< " Signal- " << signal << " " << ourSignal.unitId <<endl;
 	}
 }
 
