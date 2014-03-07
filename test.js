@@ -16,5 +16,5 @@ canReadWriter.on("voltage", function(b) { console.log(b+1); });
 var _Emit = function(a, b) {
   canReadWriter.emit(a, b);
 }
-canReadWriter.Init(_Emit);
+canReadWriter.start(_Emit);
 
