@@ -33,27 +33,27 @@ signalMap createSignalMap() {
 
   signalMap m = {
 
-    {1954, signalDef("batteryCurrent", 7, 16, 0.025, -1000, "amps")},
-    {1954, signalDef("batteryVoltage", 23, 12, 0.25, 0, "volts")},
-    {1954, signalDef("batteryTemp", 27, 8, 0.5, -40, "DegC")},
-    {1954, signalDef("batterySoc", 35, 8, 0.5, 0, "%")},
-    {1954, signalDef("engineTemp", 43, 8, 1, -40, "deg C")},
+    {1954, signalDef("batteryCurrent", 48, 16, 0.025, -1000, "amps")},
+    {1954, signalDef("batteryVoltage", 36, 12, 0.25, 0, "volts")},
+    {1954, signalDef("batteryTemp", 28, 8, 0.5, -40, "Deg C")},
+    {1954, signalDef("batterySoc", 20, 8, 0.5, 0, "%")},
+    {1954, signalDef("engineTemp", 12, 8, 1, -40, "Deg C")},
 
     
-    {1955, signalDef("engineTorque",55, 12, 0.5, -848, "Nm")},
-    {1955, signalDef("engineRpm", 39, 16, 0.25, 0, "rpm")},
-    {1955, signalDef("vehicleSpeed", 23, 15, 0.015625, 0, "km / h")},
-    {1955, signalDef("motorTemp", 7, 16, 0.1, 0, "degC")},
+    {1955, signalDef("engineTorque", 4, 12, 0.5, -848, "Nm")},
+    {1955, signalDef("engineRpm", 16, 16, 0.25, 0, "rpm")},
+    {1955, signalDef("vehicleSpeed", 33, 15, 0.015625, 0, "km / h")},
+    {1955, signalDef("motorTemp", 48, 16, 0.1, 0, "degC")},
 
-    {1956, signalDef("transRatio", 55, 8, 0.03125, 0, "")},
-    {1956, signalDef("transGear", 46, 4, 1, 0, "")},
-    {1956, signalDef("vehicleBrake", 47, 1, 1, 0, "")},
-    {1956, signalDef("vehicleAccel", 39, 8, 0.392156862745098, 0, "%")},
-    {1956, signalDef("motorTorque", 16, 16, 0.1, 0, "Nm")},
-    {1956, signalDef("motorRpm", 0, 16, 1, 0, "rpm")},
+    {1956, signalDef("transRatio", 8, 8, 0.03125, 0, "")},
+    {1956, signalDef("transGear", 19, 4, 1, 0, "")},
+    {1956, signalDef("vehicleBrake", 23, 1, 1, 0, "")},
+    {1956, signalDef("vehicleAccel", 24, 8, 0.392156862745098, 0, "%")},
+    {1956, signalDef("motorTorque", 32, 16, 0.1, 0, "Nm")},
+    {1956, signalDef("motorRpm", 48, 16, 1, 0, "rpm")},
 
-    {1957, signalDef("chargerCurrent", 23, 16, 0.01, 0, "A")},
-    {1957, signalDef("chargerVoltage", 7, 16, 0.1, 0, "V")},
+    {1957, signalDef("chargerCurrent", 32, 16, 0.01, 0, "A")},
+    {1957, signalDef("chargerVoltage",48, 16, 0.1, 0, "V")},
   };
 
   return m;
@@ -62,31 +62,31 @@ signalMap createSignalMap() {
 // Takes an id and byte array and prints out the corresponding signal definitions
 void parse(signalMap m, unsigned long id, unsigned char message[], unsigned int byteLength) { 
   int length = byteLength;
-  int mask;
+  unsigned long mask;
   double signal;
   unsigned long data = 0;
   for (int i = 0; i < length; i++) {
-    data += ((unsigned long)message[i] << (i*8));
+    data += ((unsigned long)message[i] << ((length-1-i)*8));
   }
   cout << data << endl;
   auto range = m.equal_range(id);
   for (auto it = range.first; it != range.second; ++it) {
     signalDef ourSignal = it->second;
-    mask = ((1 << ourSignal.length) - 1) << ourSignal.startBit;
+    unsigned long ones = ((1 << ourSignal.length) - 1);
+    mask = ones << ourSignal.startBit;
     signal = (data & mask) >> ourSignal.startBit;
     signal *= ourSignal.scale;
     signal += ourSignal.offset;
-    cout <<" Signal "<< ourSignal.name <<":  Start Bit- " <<ourSignal.startBit<<"  Length Bit- "<< ourSignal.length
-    << "  Scale- "<< ourSignal.scale <<"  Offset- " << ourSignal.offset
-    << " Signal- " << signal << " " << ourSignal.unitId <<endl;
+    // cout << "Our signal: \t" << signal << endl;
   }
 }
 
 // For testing purposes
 // Run ./"filename".out to run main
-int main() {
-  signalMap m = createSignalMap();
-  unsigned char bytes[8] ={155, 203, 87, 23, 219, 196, 32, 0};
-  parse(m, 1954, bytes, 8);
-  return 1;
-}
+// int main() {
+//   signalMap m = createSignalMap();
+//   unsigned char bytes[8] ={0x9C, 0x68, 0x00, 0xC5, 0x80, 0x43, 0xA0, 0x00};
+//   // unsigned char bytes[8] ={0x00, 0x0A, 0x00, 0x80, 0x00, 0x04, 0x6A, 0x20};
+//   parse(m, 1954, bytes, 8);
+//   return 1;
+// }
