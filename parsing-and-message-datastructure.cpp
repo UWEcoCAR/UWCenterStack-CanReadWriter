@@ -77,6 +77,7 @@ void parse(signalMap m, unsigned long id, unsigned char message[], unsigned int 
     signal = (data & mask) >> ourSignal.startBit;
     signal *= ourSignal.scale;
     signal += ourSignal.offset;
+    // return signal;
     // cout << "Our signal: \t" << signal << endl;
   }
 }
