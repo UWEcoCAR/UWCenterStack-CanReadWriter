@@ -4,6 +4,9 @@ export PATH=$PATH:/usr/local/share/npm/bin
 # uwcs-crw - Changes the current directory to the UWCenterStack-CanReadWriter repo directory
 alias uwcs-crw='cd $UWCENTERSTACK_CANREADWRITER_HOME'
 
+# uwcs-crw-init - Downloads dependencies and rebuilds module
+alias uwcs-crw-init='cd $UWCENTERSTACK_CANREADWRITER_HOME && npm install'
+
 # uwcs-crw-build - Recompiles the C++
 alias uwcs-crw-rebuild='cd $UWCENTERSTACK_CANREADWRITER_HOME && npm build .'
 

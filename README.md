@@ -1,5 +1,15 @@
 UWCenterStack-CanReadWriter
 ============================
+NOTE: This repository only builds on Ubuntu that has Kvaser canlib installed and
+is designed for use with the Kvaser usbCAN II HS/SWC module.
+
+It is assumed you have node, npm, and kvaser canlib. If not, do that first: (for Ubuntu 13.10)
+```
+sudo apt-get install nodejs
+sudo apt-get install npm
+sudo ln -s /usr/bin/nodejs /usr/bin/node
+```
+Instructions for installing Kvaser canlib: http://www.kvaser.com/support/knowledge-base/?knowledge_base_category=getting-started#/driver-and-hardware-installation-for-linux
 
 ## Installation
 ```
