@@ -3,5 +3,6 @@
 /build
 
 *.iml
-
-parsing-and-message-datastructure.out
+*.log
+*.out
+*.o
