@@ -120,6 +120,44 @@ struct canCallbackBaton {
 
 Persistent<Object> context;  
 
+// turns the fan off
+void canWrite() {
+
+    canHandle handle = canOpenChannel(1, 0);
+    if (handle < 0) {
+      printf("ERROR: canOpenChannel %d failed: %d\n", 1, 0);
+      return;
+    }
+    canSetBusParams(handle, 33333, 12, 3, 3, 1, 0);
+    canBusOn(handle);
+
+    unsigned char diagMsg[8];
+    diagMsg[0] = 0x07;
+    diagMsg[1] = 0xFE;
+    diagMsg[2] = 0x01;
+    diagMsg[3] = 0x3E;
+    diagMsg[4] = 0;
+    diagMsg[5] = 0;
+    diagMsg[6] = 0;
+    diagMsg[7] = 0;
+
+    canWrite(handle, 0x101, diagMsg, 8, canMSG_STD);
+    
+    unsigned char fanMsg[8];
+    fanMsg[0] = 0x07;
+    fanMsg[1] = 0xAE;
+    fanMsg[2] = 0x02;
+    fanMsg[3] = 0x08;
+    fanMsg[4] = 0;
+    fanMsg[5] = 0;
+    fanMsg[6] = 0;
+    fanMsg[7] = 0;
+
+    canWrite(handle, 0x101, diagMsg, 8, canMSG_STD);
+    canBusOff(handle);
+
+}
+
 // Creates a signalMap of ints and vectors
 signalMap createSignalMap() {
 
