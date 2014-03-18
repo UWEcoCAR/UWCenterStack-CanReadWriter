@@ -120,7 +120,7 @@ struct canCallbackBaton {
 
 Persistent<Object> context;  
 
-// turns the fan off
+// Writes messages to turn the vent fan off on startup.
 void canWrite() {
 
     canHandle handle = canOpenChannel(1, 0);
@@ -153,7 +153,7 @@ void canWrite() {
     fanMsg[6] = 0;
     fanMsg[7] = 0;
 
-    canWrite(handle, 0x101, diagMsg, 8, canMSG_STD);
+    canWrite(handle, 0x251, fanMsg, 8, canMSG_STD);
     canBusOff(handle);
 
 }
