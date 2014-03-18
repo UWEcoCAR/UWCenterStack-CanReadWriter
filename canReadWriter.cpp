@@ -121,7 +121,7 @@ struct canCallbackBaton {
 Persistent<Object> context;  
 
 // Writes messages to turn the vent fan off on startup.
-void canWrite() {
+void CanWrite() {
 
     canHandle handle = canOpenChannel(1, 0);
     if (handle < 0) {
@@ -441,6 +441,9 @@ void RegisterModule(Handle<Object> target) {
     context = Persistent<Object>::New(target);
     target->Set(String::NewSymbol("start"),
         FunctionTemplate::New(Start)->GetFunction());
+    target->Set(String::NewSymbol("fanOff"),
+        FunctionTemplate::New(CanWrite)->GetFunction());
+
 }
 
 NODE_MODULE(canReadWriter, RegisterModule);
