@@ -117,6 +117,42 @@ struct canCallbackBaton {
     uv_mutex_t* processedQueueLock;
 };
 
+// Data to pass to WriteMessages
+struct canProcessWriteBaton {
+
+    // bus params
+    int channel;
+    int id;
+    unsigned char* msg;
+    int msgLength;
+
+    // synchronization
+    queue<canMessage*>* writeQueue;
+    uv_mutex_t* writeQueueLock;
+    uv_cond_t* writeQueueNotEmpty;
+};
+
+struct canWriteBaton {
+    // bus params
+    int channel;
+    int baudRate;
+    int tseg1;
+    int tseg2;
+    int sjw;
+    int samplePoints;
+    int syncMode;
+    int canFlags;
+
+    // id and length of message to send
+    int id;
+    int length;
+
+    // synchronization
+    queue<canMessage*>* writeQueue;
+    uv_mutex_t* writeQueueLock;
+    uv_cond_t* writeQueueNotEmpty;
+};
+
 
 Persistent<Object> context;  
 
@@ -129,6 +165,7 @@ Handle<Value> CanWrite(const Arguments& args) {
     if (handle < 0) {
       printf("ERROR: canOpenChannel %d failed: %d\n", 1, 0);
       return Undefined();
+
     }
     canSetBusParams(handle, 33333, 12, 3, 3, 1, 0);
     canBusOn(handle);
@@ -355,6 +392,83 @@ void ProcessMessages(uv_work_t* req) {
 
         // Signal the async that there are signals to fire
         uv_async_send(baton->processedAsync);
+
+        // Clean up
+        delete m;
+    }
+}
+
+/*
+Constantly sends the messages from writeQueue (never exits).
+req->data should be a canWriteBaton.
+Does not need to run in the V8 thread.
+*/
+void ProcessWriteMessages(uv_work_t* req) {
+
+    // Retrieve baton
+    canProcessWriteBaton* baton = (canProcessWriteBaton*) req->data;
+
+    while (1) {
+
+	// PROCESS MESSAGE HERE: ARUSH's PART
+        canMessage *m = new canMessage;
+
+        // Add message to writeQueue
+        uv_mutex_lock(baton->writeQueueLock);
+        baton->writeQueue->push(m);
+
+        if (baton->writeQueue->size() > 10) {
+            printf("WARNING: There are %lu unprocessed messages\n", baton->writeQueue->size());
+        }
+	
+        uv_mutex_unlock(baton->writeQueueLock);
+
+        // Let others know there is something to send
+        uv_cond_signal(baton->writeQueueNotEmpty);
+    }
+}
+
+/*
+Constantly reads messages from a CAN bus using the baton's params (never exiting).
+Pushes messages onto the baton's readQueue.
+req->data should be a canReadBaton.
+Does not need to run in the V8 thread.
+*/
+void SendWriteMessages(uv_work_t* req) {
+    
+    // Retrieve baton
+    canWriteBaton* baton = (canWriteBaton*) req->data;
+
+    while (1) {
+
+        // Lock writeQueue
+        uv_mutex_lock(baton->writeQueueLock);
+
+        // Wait for a message to come in
+        while (baton->writeQueue->empty()) {
+            uv_cond_wait(baton->writeQueueNotEmpty, baton->writeQueueLock);
+        }
+
+        // Pop the message off the queue
+        canMessage* m = baton->writeQueue->front();
+        baton->writeQueue->pop();
+
+        // Unlock queue while we send the message
+        uv_mutex_unlock(baton->writeQueueLock);
+
+        // send the message
+        canHandle handle = canOpenChannel(baton->channel, baton->canFlags);
+        if (handle < 0) {
+            printf("ERROR: canOpenChannel %d failed: %d\n", baton->channel, handle);
+            return;
+        }
+        
+        // set bus params
+        canSetBusParams(handle, baton->baudRate, baton->tseg1, baton->tseg2, baton->sjw, baton->samplePoints, baton->syncMode);
+        canBusOn(handle);
+
+        // write message
+        canWrite(handle, baton->id, m, baton->length, canMSG_STD);
 
         // Clean up
         delete m;
