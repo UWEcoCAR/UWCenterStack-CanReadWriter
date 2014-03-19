@@ -120,16 +120,15 @@ struct canCallbackBaton {
 // Data to pass to WriteMessages
 struct canProcessWriteBaton {
 
-    // bus params
-    int channel;
-    int id;
-    unsigned char* msg;
-    int msgLength;
-
-    // synchronization
+    // synchronization from javascript
     queue<canMessage*>* writeQueue;
     uv_mutex_t* writeQueueLock;
     uv_cond_t* writeQueueNotEmpty;
+
+    // processed side synchronization
+    queue<canMessage*>* processedWriteQueue;
+    uv_mutex_t* processedWriteQueueLock;
+    uv_cond_t* processedWriteQueueNotEmpty;
 };
 
 struct canWriteBaton {
@@ -143,60 +142,15 @@ struct canWriteBaton {
     int syncMode;
     int canFlags;
 
-    // id and length of message to send
-    int id;
-    int length;
-
     // synchronization
-    queue<canMessage*>* writeQueue;
-    uv_mutex_t* writeQueueLock;
-    uv_cond_t* writeQueueNotEmpty;
+    queue<canMessage*>* processedWriteQueue;
+    uv_mutex_t* processedWriteQueueLock;
+    uv_cond_t* processedWriteQueueNotEmpty;
 };
 
 
 Persistent<Object> context;  
 
-// Writes messages to turn the vent fan off on startup.
-Handle<Value> CanWrite(const Arguments& args) {
-
-    HandleScope scope;
-
-    canHandle handle = canOpenChannel(1, 0);
-    if (handle < 0) {
-      printf("ERROR: canOpenChannel %d failed: %d\n", 1, 0);
-      return Undefined();
-
-    }
-    canSetBusParams(handle, 33333, 12, 3, 3, 1, 0);
-    canBusOn(handle);
-
-    unsigned char diagMsg[8];
-    diagMsg[0] = 0x07;
-    diagMsg[1] = 0xFE;
-    diagMsg[2] = 0x01;
-    diagMsg[3] = 0x3E;
-    diagMsg[4] = 0;
-    diagMsg[5] = 0;
-    diagMsg[6] = 0;
-    diagMsg[7] = 0;
-
-    canWrite(handle, 0x101, diagMsg, 8, canMSG_STD);
-    
-    unsigned char fanMsg[8];
-    fanMsg[0] = 0x07;
-    fanMsg[1] = 0xAE;
-    fanMsg[2] = 0x02;
-    fanMsg[3] = 0x08;
-    fanMsg[4] = 0;
-    fanMsg[5] = 0;
-    fanMsg[6] = 0;
-    fanMsg[7] = 0;
-
-    canWrite(handle, 0x251, fanMsg, 8, canMSG_STD);
-    canBusOff(handle);
-    return Undefined();
-
-}
 
 // Creates a signalMap of ints and vectors
 signalMap createSignalMap() {
@@ -399,8 +353,8 @@ void ProcessMessages(uv_work_t* req) {
 }
 
 /*
-Constantly sends the messages from writeQueue (never exits).
-req->data should be a canWriteBaton.
+Constantly processes messages from writeQueue (never exits).
+req->data should be a canProcessWriteBaton.
 Does not need to run in the V8 thread.
 */
 void ProcessWriteMessages(uv_work_t* req) {
@@ -409,38 +363,6 @@ void ProcessWriteMessages(uv_work_t* req) {
     canProcessWriteBaton* baton = (canProcessWriteBaton*) req->data;
 
     while (1) {
-
-	// PROCESS MESSAGE HERE: ARUSH's PART
-        canMessage *m = new canMessage;
-
-        // Add message to writeQueue
-        uv_mutex_lock(baton->writeQueueLock);
-        baton->writeQueue->push(m);
-
-        if (baton->writeQueue->size() > 10) {
-            printf("WARNING: There are %lu unprocessed messages\n", baton->writeQueue->size());
-        }
-	
-        uv_mutex_unlock(baton->writeQueueLock);
-
-        // Let others know there is something to send
-        uv_cond_signal(baton->writeQueueNotEmpty);
-    }
-}
-
-/*
-Constantly reads messages from a CAN bus using the baton's params (never exiting).
-Pushes messages onto the baton's readQueue.
-req->data should be a canReadBaton.
-Does not need to run in the V8 thread.
-*/
-void SendWriteMessages(uv_work_t* req) {
-    
-    // Retrieve baton
-    canWriteBaton* baton = (canWriteBaton*) req->data;
-
-    while (1) {
-
         // Lock writeQueue
         uv_mutex_lock(baton->writeQueueLock);
 
@@ -449,26 +371,69 @@ void SendWriteMessages(uv_work_t* req) {
             uv_cond_wait(baton->writeQueueNotEmpty, baton->writeQueueLock);
         }
 
-        // Pop the message off the queue
-        canMessage* m = baton->writeQueue->front();
+        // Pop the message information off the queue
         baton->writeQueue->pop();
 
         // Unlock queue while we send the message
         uv_mutex_unlock(baton->writeQueueLock);
+	
+        // PROCESS MESSAGE HERE: ARUSH's PART
+        canMessage *m = new canMessage;
+
+        // Lock processedQueue
+        uv_mutex_lock(baton->processedWriteQueueLock);
+	// Add message to processed queue
+        baton->processedWriteQueue->push(m);
+
+        if (baton->processedWriteQueue->size() > 80) {
+            printf("WARNING: There are %lu unprocessed messages\n", baton->processedWriteQueue->size());
+        }
+	
+        // Unlock processedWriteQueue while we go back to waiting for messages
+        // from JavaScript
+        uv_mutex_unlock(baton->processedWriteQueueLock);
+
+        // Let others know there is something to send
+        uv_cond_signal(baton->processedWriteQueueNotEmpty);
+    }
+}
+
+/*
+Constantly sends messages from processedWriteQueue.
+req->data should be a canReadBaton.
+Does not need to run in the V8 thread.
+*/
+void SendWriteMessages(uv_work_t* req) {
+    
+    // Retrieve baton
+    canWriteBaton* baton = (canWriteBaton*) req->data;
+    canHandle handle = canOpenChannel(baton->channel, baton->canFlags);
+    if (handle < 0) {
+      printf("ERROR: canOpenChannel %d failed: %d\n", baton->channel, handle);
+      return;
+    }
+    canSetBusParams(handle, baton->baudRate, baton->tseg1, baton->tseg2, baton->sjw, baton->samplePoints, baton->syncMode);
+    canBusOn(handle);
+
+    while (1) {
+
+        // Lock processedWriteQueue
+        uv_mutex_lock(baton->processedWriteQueueLock);
+
+        // Wait for a message to come in
+        while (baton->processedWriteQueue->empty()) {
+          uv_cond_wait(baton->processedWriteQueueNotEmpty, baton->processedWriteQueueLock);
+        }
+
+        // Pop the message off the queue
+        canMessage* m = baton->processedWriteQueue->front();
+        baton->processedWriteQueue->pop();
+
+        // Unlock queue while we send the message
+        uv_mutex_unlock(baton->processedWriteQueueLock);
 
         // send the message
-        canHandle handle = canOpenChannel(baton->channel, baton->canFlags);
-        if (handle < 0) {
-            printf("ERROR: canOpenChannel %d failed: %d\n", baton->channel, handle);
-            return;
-        }
-        
-        // set bus params
-        canSetBusParams(handle, baton->baudRate, baton->tseg1, baton->tseg2, baton->sjw, baton->samplePoints, baton->syncMode);
-        canBusOn(handle);
-
-        // write message
-        canWrite(handle, baton->id, m, baton->length, canMSG_STD);
+        canWrite(handle, m->id, m->data, m->length, canMSG_STD);
 
         // Clean up
         delete m;
@@ -509,6 +474,20 @@ Handle<Value> Start(const Arguments& args) {
     uv_async_t* processedAsync = new uv_async_t;
     processedAsync->data = (void*) processedAsyncBaton;
 
+    // Initialize processed write synchronization
+    queue<canMessage*>* lsProcessedWriteQueue = new queue<canMessage*>();
+    uv_mutex_t* lsProcessedWriteQueueLock = new uv_mutex_t;
+    uv_cond_t* lsProcessedWriteQueueNotEmpty = new uv_cond_t;
+    uv_mutex_init(lsProcessedWriteQueueLock);
+    uv_cond_init(lsProcessedWriteQueueNotEmpty);
+
+    // Initialize write synchronization
+    queue<canMessage*>* lsWriteQueue = new queue<canMessage*>();
+    uv_mutex_t* lsWriteQueueLock = new uv_mutex_t;
+    uv_cond_t* lsWriteQueueNotEmpty = new uv_cond_t;
+    uv_mutex_init(lsWriteQueueLock);
+    uv_cond_init(lsWriteQueueNotEmpty);
+
     // Initialize HS read baton
     canReadBaton* hsCanReadBaton = new canReadBaton;
     hsCanReadBaton->signalDefinitions = signalDefinitions;
@@ -542,11 +521,44 @@ Handle<Value> Start(const Arguments& args) {
     uv_work_t* hsProcessReq = new uv_work_t();
     hsProcessReq->data = (void*) hsCanProcessBaton;
 
+    // Initialize LS process baton
+    canProcessWriteBaton* lsCanProcessWriteBaton = new canProcessWriteBaton;
+    lsCanProcessWriteBaton->writeQueue = lsWriteQueue;
+    lsCanProcessWriteBaton->writeQueueLock = lsWriteQueueLock;
+    lsCanProcessWriteBaton->writeQueueNotEmpty = lsWriteQueueNotEmpty;
+    lsCanProcessWriteBaton->processedWriteQueue = lsProcessedWriteQueue;
+    lsCanProcessWriteBaton->processedWriteQueueLock = lsProcessedWriteQueueLock;
+    lsCanProcessWriteBaton->processedWriteQueueNotEmpty = lsProcessedWriteQueueNotEmpty;
+
+    // Initialize LS write baton
+    canWriteBaton* lsCanWriteBaton = new canWriteBaton;
+    lsCanWriteBaton->channel = LS_CHANNEL;
+    lsCanWriteBaton->baudRate = LS_BAUD;
+    lsCanWriteBaton->tseg1 = LS_TSEG1;
+    lsCanWriteBaton->tseg2 = LS_TSEG2;
+    lsCanWriteBaton->sjw = LS_SJW;
+    lsCanWriteBaton->samplePoints = LS_SAMPLE_POINTS;
+    lsCanWriteBaton->syncMode = LS_SYNC_MODE;
+    lsCanWriteBaton->canFlags = LS_FLAGS;
+    lsCanWriteBaton->processedWriteQueue = lsProcessedWriteQueue;
+    lsCanWriteBaton->processedWriteQueueLock = lsProcessedWriteQueueLock;
+    lsCanWriteBaton->processedWriteQueueNotEmpty = lsProcessedWriteQueueNotEmpty;
+
+    // Initialize LS process work request
+    uv_work_t* lsProcessWriteReq = new uv_work_t();
+    lsProcessWriteReq->data = (void*) lsCanProcessWriteBaton;
+    
+    // Initialize LS write work request
+    uv_work_t* lsWriteReq = new uv_work_t();
+    lsWriteReq->data = (void*) lsCanWriteBaton;
+     
     // Start all our threads
     uv_loop_t* loop = uv_default_loop();
     uv_async_init(loop, processedAsync, ExecuteCallbacks);
     uv_queue_work(loop, hsReadReq, ReadMessages, NULL);
     uv_queue_work(loop, hsProcessReq, ProcessMessages, NULL);
+    uv_queue_work(loop, lsProcessWriteReq, ProcessWriteMessages, NULL);
+    uv_queue_work(loop, lsWriteReq, SendWriteMessages, NULL);
 
     return Undefined();
 }
@@ -558,9 +570,6 @@ void RegisterModule(Handle<Object> target) {
     context = Persistent<Object>::New(target);
     target->Set(String::NewSymbol("start"),
         FunctionTemplate::New(Start)->GetFunction());
-    target->Set(String::NewSymbol("fanOff"),
-        FunctionTemplate::New(CanWrite)->GetFunction());
-
 }
 
 NODE_MODULE(canReadWriter, RegisterModule);
