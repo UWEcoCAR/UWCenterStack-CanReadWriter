@@ -43,19 +43,19 @@ using namespace std;
 // Struct definition plus constructor for struct
 struct signalDef {
   public:
-    boolean isExtended;
+    bool isExtended;
     string name;
-    boolean isSigned;
+    bool isSigned;
     int startBit;
     int length;
     double scale;
     int offset;
     string unit;
 
-    signalDef(boolean isExtended, string nameSig, boolean isSigned, int startInt, int lengthInt, double scaleInt, int offsetInt, string unit) :
+    signalDef(bool isExtended, string nameSig, bool isSigned, int startInt, int lengthInt, double scaleInt, int offsetInt, string unit) :
     isExtended(isExtended),
     name(nameSig),
-    isSigned(isSigned);
+    isSigned(isSigned),
     startBit(startInt),
     length(lengthInt),
     scale(scaleInt),
@@ -121,7 +121,7 @@ struct canProcessReadBaton {
 };
 
 // Data to pass to ExecuteCallbacks
-struct canCallbackBaton {
+struct canReadCallbackBaton {
     // callback function
     Persistent<Function> callback;
 
@@ -135,7 +135,7 @@ struct canProcessWriteBaton {
     writeMessageMap messageDefinitions;
 
     // synchronization from javascript
-    queue<canMessage*>* writeQueue;
+    queue<canSignal*>* writeQueue;
     uv_mutex_t* writeQueueLock;
     uv_cond_t* writeQueueNotEmpty;
 
@@ -293,7 +293,7 @@ vector<canSignal*> ReadParse(readSignalMap m, unsigned long id, unsigned char me
 
     // If the signal is signed and negative, move the signed bit to the end (e.g. with length 6, 0b0...00101010 becomes 0b1...11101010)
     if (ourSignal.isSigned && tempSignal >> (ourSignal.length - 1) != 0) {
-      tempSignal = tempSignal | -1 << ourSignal.length;
+      tempSignal = (tempSignal | -1 << ourSignal.length);
     }
 
     // Scale and offset signal
@@ -320,7 +320,7 @@ vector<canSignal*> ReadParse(readSignalMap m, unsigned long id, unsigned char me
 void ExecuteCallbacks(uv_async_t* handle, int status /*UNUSED*/) {
 
     // Retrieve baton
-    canCallbackBaton* baton = (canCallbackBaton*) handle->data;
+    canReadCallbackBaton* baton = (canReadCallbackBaton*) handle->data;
 
     // Lock the processedQueue
     uv_mutex_lock(baton->processedReadQueueLock);
@@ -473,13 +473,14 @@ void ProcessWriteMessages(uv_work_t* req) {
         }
 
         // Pop the message information off the queue
-        canSignal* signal = baton->writeQueue->pop();
+        canSignal* signal = baton->writeQueue->front();
+	baton->writeQueue->pop();
 
         // Unlock queue while we send the message
         uv_mutex_unlock(baton->writeQueueLock);
 	
         // Process Message
-        canMessage *m = WriteParse(baton->messageDefinitions, signal->name, signal->value) {
+        canMessage *m = WriteParse(baton->messageDefinitions, signal->name, signal->value);
 
         // Lock processedQueue
         uv_mutex_lock(baton->processedWriteQueueLock);
@@ -547,8 +548,8 @@ Handle<Value> Write(const Arguments& args) {
     // All V8 functions need a scope
     HandleScope scope;
 
-    if (args.length() < 2) {
-        return ThrowException(Exception::TypeError(String::New("You must pass two arguments")))       
+    if (args.Length() < 2) {
+      return ThrowException(Exception::TypeError(String::New("You must pass two arguments")));       
     }
 
     canSignal* signal = new canSignal;
@@ -599,10 +600,10 @@ Handle<Value> Start(const Arguments& args) {
     uv_mutex_init(processedReadQueueLock);
 
     // Initialize processedReadAsync baton
-    canReadCallbackBaton* processedAsyncBaton = new canReadCallbackBaton;
-    processedAsyncBaton->processedReadQueue = processedReadQueue;
-    processedAsyncBaton->processedReadQueueLock = processedReadQueueLock;
-    processedAsyncBaton->callback = Persistent<Function>::New(Local<Function>::Cast(args[0]));
+    canReadCallbackBaton* processedReadAsyncBaton = new canReadCallbackBaton;
+    processedReadAsyncBaton->processedReadQueue = processedReadQueue;
+    processedReadAsyncBaton->processedReadQueueLock = processedReadQueueLock;
+    processedReadAsyncBaton->callback = Persistent<Function>::New(Local<Function>::Cast(args[0]));
 
     // Initialize processedReadAsync
     uv_async_t* processedReadAsync = new uv_async_t;
@@ -653,24 +654,24 @@ Handle<Value> Start(const Arguments& args) {
     lsCanReadBaton->readQueueNotEmpty = lsReadQueueNotEmpty;
 
     // Initialize HS read process baton
-    canProcessBaton* canHsProcessReadBaton = new canProcessBaton;
+    canProcessReadBaton* canHsProcessReadBaton = new canProcessReadBaton;
     canHsProcessReadBaton->signalDefinitions = createHsReadSignalMap();
     canHsProcessReadBaton->readQueue = hsReadQueue;
     canHsProcessReadBaton->readQueueLock = hsReadQueueLock;
     canHsProcessReadBaton->readQueueNotEmpty = hsReadQueueNotEmpty;
-    canHsProcessReadBaton->processedQueue = processedReadQueue;
-    canHsProcessReadBaton->processedQueueLock = processedReadQueueLock;
-    canHsProcessReadBaton->processedAsync = processedReadAsync;
+    canHsProcessReadBaton->processedReadQueue = processedReadQueue;
+    canHsProcessReadBaton->processedReadQueueLock = processedReadQueueLock;
+    canHsProcessReadBaton->processedReadAsync = processedReadAsync;
 
     // Initialize LS read process baton
-    canProcessBaton* canLsProcessReadBaton = new canProcessBaton;
+    canProcessReadBaton* canLsProcessReadBaton = new canProcessReadBaton;
     canLsProcessReadBaton->signalDefinitions = createLsReadSignalMap();
     canLsProcessReadBaton->readQueue = lsReadQueue;
     canLsProcessReadBaton->readQueueLock = lsReadQueueLock;
     canLsProcessReadBaton->readQueueNotEmpty = lsReadQueueNotEmpty;
-    canLsProcessReadBaton->processedQueue = processedReadQueue;
-    canLsProcessReadBaton->processedQueueLock = processedReadQueueLock;
-    canLsProcessReadBaton->processedAsync = processedReadAsync;
+    canLsProcessReadBaton->processedReadQueue = processedReadQueue;
+    canLsProcessReadBaton->processedReadQueueLock = processedReadQueueLock;
+    canLsProcessReadBaton->processedReadAsync = processedReadAsync;
 
     // Initialize HS read work request
     uv_work_t* hsReadReq = new uv_work_t();
@@ -690,7 +691,7 @@ Handle<Value> Start(const Arguments& args) {
 
     // Initialize LS write process baton
     canProcessWriteBaton* lsCanProcessWriteBaton = new canProcessWriteBaton;
-    lsCanProcessWriteBaton->messageDefinitions = createHsWriteSignalMap();
+    lsCanProcessWriteBaton->messageDefinitions = createLsWriteMessageMap();
     lsCanProcessWriteBaton->writeQueue = lsWriteQueue;
     lsCanProcessWriteBaton->writeQueueLock = lsWriteQueueLock;
     lsCanProcessWriteBaton->writeQueueNotEmpty = lsWriteQueueNotEmpty;
@@ -722,11 +723,11 @@ Handle<Value> Start(const Arguments& args) {
      
     // Start all our threads
     uv_loop_t* loop = uv_default_loop();
-    uv_async_init(loop, readProcessedAsync, ExecuteCallbacks);
+    uv_async_init(loop, processedReadAsync, ExecuteCallbacks);
     uv_queue_work(loop, hsReadReq, ReadMessages, NULL);
     uv_queue_work(loop, lsReadReq, ReadMessages, NULL);
-    uv_queue_work(loop, hsProcessReadReq, ProcessMessages, NULL);
-    uv_queue_work(loop, lsProcessReadReq, ProcessMessages, NULL);
+    uv_queue_work(loop, hsProcessReadReq, ProcessReadMessages, NULL);
+    uv_queue_work(loop, lsProcessReadReq, ProcessReadMessages, NULL);
     uv_queue_work(loop, lsProcessWriteReq, ProcessWriteMessages, NULL);
     uv_queue_work(loop, lsWriteReq, SendWriteMessages, NULL);
 
