@@ -121,12 +121,14 @@ struct canCallbackBaton {
 Persistent<Object> context;  
 
 // Writes messages to turn the vent fan off on startup.
-void CanWrite() {
+Handle<Value> CanWrite(const Arguments& args) {
+
+    HandleScope scope;
 
     canHandle handle = canOpenChannel(1, 0);
     if (handle < 0) {
       printf("ERROR: canOpenChannel %d failed: %d\n", 1, 0);
-      return;
+      return Undefined();
     }
     canSetBusParams(handle, 33333, 12, 3, 3, 1, 0);
     canBusOn(handle);
@@ -155,6 +157,7 @@ void CanWrite() {
 
     canWrite(handle, 0x251, fanMsg, 8, canMSG_STD);
     canBusOff(handle);
+    return Undefined();
 
 }
 
