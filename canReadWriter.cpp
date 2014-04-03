@@ -32,25 +32,34 @@ extern "C" {
 #define LS_SYNC_MODE 0
 #define LS_FLAGS 0
 
+#define IS_SIGNED true
+#define IS_NOT_SIGNED false
+#define IS_EXTENDED true
+#define IS_NOT_EXTENDED false
+
 using namespace v8;
 using namespace std;
 
 // Struct definition plus constructor for struct
 struct signalDef {
   public:
+    boolean isExtended;
     string name;
+    boolean isSigned;
     int startBit;
     int length;
     double scale;
     int offset;
     string unit;
 
-    signalDef(string nameSig, int startInt, int lengthInt, double scaleInt, int offsetInt, string unit) : 
-    name(nameSig), 
-    startBit(startInt), 
-    length(lengthInt), 
-    scale(scaleInt), 
-    offset(offsetInt), 
+    signalDef(boolean isExtended, string nameSig, boolean isSigned, int startInt, int lengthInt, double scaleInt, int offsetInt, string unit) :
+    isExtended(isExtended),
+    name(nameSig),
+    isSigned(isSigned);
+    startBit(startInt),
+    length(lengthInt),
+    scale(scaleInt),
+    offset(offsetInt),
     unit(unit)  { }
 };
 
@@ -118,7 +127,7 @@ struct canCallbackBaton {
 };
 
 
-Persistent<Object> context;  
+Persistent<Object> context;
 
 // Writes messages to turn the vent fan off on startup.
 Handle<Value> CanWrite(const Arguments& args) {
@@ -144,7 +153,7 @@ Handle<Value> CanWrite(const Arguments& args) {
     diagMsg[7] = 0;
 
     canWrite(handle, 0x101, diagMsg, 8, canMSG_STD);
-    
+
     unsigned char fanMsg[8];
     fanMsg[0] = 0x07;
     fanMsg[1] = 0xAE;
@@ -162,38 +171,50 @@ Handle<Value> CanWrite(const Arguments& args) {
 }
 
 // Creates a signalMap of ints and vectors
-signalMap createSignalMap() {
+signalMap createHsSignalMap() {
 
   signalMap m = {
 
-    {1954, signalDef("batteryCurrent", 48, 16, 0.025, -1000, "amps")},
-    {1954, signalDef("batteryVoltage", 36, 12, 0.25, 0, "volts")},
-    {1954, signalDef("batteryTemp", 28, 8, 0.5, -40, "Deg C")},
-    {1954, signalDef("batterySoc", 20, 8, 0.5, 0, "%")},
-    {1954, signalDef("engineTemp", 12, 8, 1, -40, "Deg C")},
+    {1954, signalDef(IS_NOT_EXTENDED, "batteryCurrent", IS_NOT_SIGNED, 48, 16, 0.025, -1000, "amps")},
+    {1954, signalDef(IS_NOT_EXTENDED, "batteryVoltage", IS_NOT_SIGNED, 36, 12, 0.25, 0, "volts")},
+    {1954, signalDef(IS_NOT_EXTENDED, "batteryTemp", IS_NOT_SIGNED, 28, 8, 0.5, -40, "Deg C")},
+    {1954, signalDef(IS_NOT_EXTENDED, "batterySoc", IS_NOT_SIGNED, 20, 8, 0.5, 0, "%")},
+    {1954, signalDef(IS_NOT_EXTENDED, "engineTemp", IS_NOT_SIGNED, 12, 8, 1, -40, "Deg C")},
 
-    
-    {1955, signalDef("engineTorque", 4, 12, 0.5, -848, "Nm")},
-    {1955, signalDef("engineRpm", 16, 16, 0.25, 0, "rpm")},
-    {1955, signalDef("vehicleSpeed", 33, 15, 0.015625, 0, "km / h")},
-    {1955, signalDef("motorTemp", 48, 16, 0.1, 0, "degC")},
 
-    {1956, signalDef("transRatio", 8, 8, 0.03125, 0, "")},
-    {1956, signalDef("transGear", 19, 4, 1, 0, "")},
-    {1956, signalDef("vehicleBrake", 23, 1, 1, 0, "")},
-    {1956, signalDef("vehicleAccel", 24, 8, 0.392156862745098, 0, "%")},
-    {1956, signalDef("motorTorque", 32, 16, 0.1, 0, "Nm")},
-    {1956, signalDef("motorRpm", 48, 16, 1, 0, "rpm")},
+    {1955, signalDef(IS_NOT_EXTENDED, "engineTorque", IS_NOT_SIGNED, 4, 12, 0.5, -848, "Nm")},
+    {1955, signalDef(IS_NOT_EXTENDED, "engineRpm", IS_NOT_SIGNED, 16, 16, 0.25, 0, "rpm")},
+    {1955, signalDef(IS_NOT_EXTENDED, "vehicleSpeed", IS_NOT_SIGNED, 33, 15, 0.015625, 0, "km / h")},
+    {1955, signalDef(IS_NOT_EXTENDED, "motorTemp", IS_NOT_SIGNED, 48, 16, 0.1, 0, "degC")},
 
-    {1957, signalDef("chargerCurrent", 32, 16, 0.01, 0, "A")},
-    {1957, signalDef("chargerVoltage",48, 16, 0.1, 0, "V")},
+    {1956, signalDef(IS_NOT_EXTENDED, "transRatio", IS_NOT_SIGNED, 8, 8, 0.03125, 0, "")},
+    {1956, signalDef(IS_NOT_EXTENDED, "transGear", IS_NOT_SIGNED, 19, 4, 1, 0, "")},
+    {1956, signalDef(IS_NOT_EXTENDED, "vehicleBrake", IS_NOT_SIGNED, 23, 1, 1, 0, "")},
+    {1956, signalDef(IS_NOT_EXTENDED, "vehicleAccel", IS_NOT_SIGNED, 24, 8, 0.392156862745098, 0, "%")},
+    {1956, signalDef(IS_NOT_EXTENDED, "motorTorque", IS_NOT_SIGNED, 32, 16, 0.1, 0, "Nm")},
+    {1956, signalDef(IS_NOT_EXTENDED, "motorRpm", IS_NOT_SIGNED, 48, 16, 1, 0, "rpm")},
+
+    {1957, signalDef(IS_NOT_EXTENDED, "chargerCurrent", IS_NOT_SIGNED, 32, 16, 0.01, 0, "A")},
+    {1957, signalDef(IS_NOT_EXTENDED, "chargerVoltage", IS_NOT_SIGNED, 48, 16, 0.1, 0, "V")},
+  };
+
+  return m;
+}
+
+// Creates a signalMap of ints and vectors
+signalMap createLsSignalMap() {
+
+  signalMap m = {
+
+    {0x102AA000, signalDef(IS_EXTENDED, "gpsLatitude", IS_SIGNED, 32, 30, 1, 0, "deg")},
+    {0x102AA000, signalDef(IS_EXTENDED, "gpsLongitude", IS_SIGNED, 0, 31, 1, 0, "deg")},
   };
 
   return m;
 }
 
 // Takes an id and byte array and prints out the corresponding signal definitions
-vector<canSignal*> Parse(signalMap m, unsigned long id, unsigned char message[], unsigned int byteLength) { 
+vector<canSignal*> Parse(signalMap m, unsigned long id, unsigned char message[], unsigned int byteLength) {
   int length = byteLength;
   unsigned long mask;
   double signal;
@@ -207,10 +228,18 @@ vector<canSignal*> Parse(signalMap m, unsigned long id, unsigned char message[],
     signalDef ourSignal = it->second;
     unsigned long ones = ((1 << ourSignal.length) - 1);
     mask = ones << ourSignal.startBit;
-    signal = (data & mask) >> ourSignal.startBit;
+    unsigned long tempSignal = (data & mask) >> ourSignal.startBit;
+
+    if (ourSignal.isSigned) {
+      signal = (~tempSignal + 1) & ((1<<64 - 1) << ourSignal.startBit);
+      signal *= -1;
+    } else {
+      signal = tempSignal;
+    }
+
     signal *= ourSignal.scale;
     signal += ourSignal.offset;
-    
+
     canSignal* cSig = new canSignal;
     cSig->name = ourSignal.name;
     cSig->value = signal;
@@ -300,7 +329,7 @@ void ReadMessages(uv_work_t* req) {
         // Add message to readQueue
         uv_mutex_lock(baton->readQueueLock);
         baton->readQueue->push(m);
-        
+
         if (baton->readQueue->size() >= 10) {
             printf("WARNING: There are %lu unprocessed messages\n", baton->readQueue->size());
         }
@@ -316,7 +345,7 @@ Constantly processes messages from the hsReadQueue into signals that
 are placed on the processedQueue (never exiting).
 Does not need to run in the V8 thread.
 */
-void ProcessMessages(uv_work_t* req) {
+void ProcessReadMessages(uv_work_t* req) {
 
     // Retrieve baton
     canProcessBaton* baton = (canProcessBaton*) req->data;
@@ -342,7 +371,7 @@ void ProcessMessages(uv_work_t* req) {
 
         // Lock processedQueue
         uv_mutex_lock(baton->processedQueueLock);
-        
+
         for (auto it = signals.begin(); it != signals.end(); ++it) {
             baton->processedQueue->push(*it);
         }
@@ -371,7 +400,7 @@ Handle<Value> Start(const Arguments& args) {
     HandleScope scope;
 
     // Initialize signalDefintions
-    signalMap signalDefinitions = createSignalMap();
+    signalMap signalDefinitions = createHsSignalMap();
 
     // Initialize HS read synchronization
     queue<canMessage*>* hsReadQueue = new queue<canMessage*>();
@@ -410,29 +439,47 @@ Handle<Value> Start(const Arguments& args) {
     hsCanReadBaton->readQueueLock = hsReadQueueLock;
     hsCanReadBaton->readQueueNotEmpty = hsReadQueueNotEmpty;
 
-    // Initialize HS process baton
-    canProcessBaton* hsCanProcessBaton = new canProcessBaton;
-    hsCanProcessBaton->signalDefinitions = signalDefinitions;
-    hsCanProcessBaton->readQueue = hsReadQueue;
-    hsCanProcessBaton->readQueueLock = hsReadQueueLock;
-    hsCanProcessBaton->readQueueNotEmpty = hsReadQueueNotEmpty;
-    hsCanProcessBaton->processedQueue = processedQueue;
-    hsCanProcessBaton->processedQueueLock = processedQueueLock;
-    hsCanProcessBaton->processedAsync = processedAsync;
+    // Initialize LS read baton
+    canReadBaton* lsCanReadBaton = new canReadBaton;
+    lsCanReadBaton->signalDefinitions = signalDefinitions;
+    lsCanReadBaton->channel = HS_CHANNEL;
+    lsCanReadBaton->baudRate = HS_BAUD;
+    lsCanReadBaton->tseg1 = HS_TSEG1;
+    lsCanReadBaton->tseg2 = HS_TSEG2;
+    lsCanReadBaton->sjw = HS_SJW;
+    lsCanReadBaton->samplePoints = HS_SAMPLE_POINTS;
+    lsCanReadBaton->syncMode = HS_SYNC_MODE;
+    lsCanReadBaton->canFlags = HS_FLAGS;
+    lsCanReadBaton->readQueue = hsReadQueue;
+    lsCanReadBaton->readQueueLock = hsReadQueueLock;
+    lsCanReadBaton->readQueueNotEmpty = hsReadQueueNotEmpty;
+
+    // Initialize read process baton
+    canProcessBaton* canReadProcessBaton = new canProcessBaton;
+    canReadProcessBaton->signalDefinitions = signalDefinitions;
+    canReadProcessBaton->lsReadQueue = lsReadQueue;
+    canReadProcessBaton->lsReadQueueLock = lsReadQueueLock;
+    canReadProcessBaton->lsReadQueueNotEmpty = lsReadQueueNotEmpty;
+    canReadProcessBaton->hsReadQueue = hsReadQueue;
+    canReadProcessBaton->hsReadQueueLock = hsReadQueueLock;
+    canReadProcessBaton->hsReadQueueNotEmpty = hsReadQueueNotEmpty;
+    canReadProcessBaton->processedQueue = processedQueue;
+    canReadProcessBaton->processedQueueLock = processedQueueLock;
+    canReadProcessBaton->processedAsync = processedAsync;
 
     // Initialize HS read work request
     uv_work_t* hsReadReq = new uv_work_t();
     hsReadReq->data = (void*) hsCanReadBaton;
 
-    // Initialize HS process work request
-    uv_work_t* hsProcessReq = new uv_work_t();
-    hsProcessReq->data = (void*) hsCanProcessBaton;
+    // Initialize read process work request
+    uv_work_t* readProcessReq = new uv_work_t();
+    readProcessReq->data = (void*) canProcessBaton;
 
     // Start all our threads
     uv_loop_t* loop = uv_default_loop();
     uv_async_init(loop, processedAsync, ExecuteCallbacks);
     uv_queue_work(loop, hsReadReq, ReadMessages, NULL);
-    uv_queue_work(loop, hsProcessReq, ProcessMessages, NULL);
+    uv_queue_work(loop, readProcessReq, ProcessReadMessages, NULL);
 
     return Undefined();
 }
