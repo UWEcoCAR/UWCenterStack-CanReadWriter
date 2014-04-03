@@ -63,9 +63,13 @@ struct signalDef {
     unit(unit)  { }
 };
 
-// Define signalMap data structure
+// Define readSignalMap data structure
 // Keys are ints and values are signalDef types
-typedef unordered_multimap<int, signalDef> signalMap;
+typedef unordered_multimap<int, signalDef> readSignalMap;
+
+// Define writeMessageMap data structure
+// Keys are strings and values are messageDef types
+typedef unordered_map<string, messageDef> writeMessageMap;
 
 // A single signal processed from a message
 struct canSignal {
@@ -83,7 +87,7 @@ struct canMessage {
 
 // Data to pass to ReadMessages
 struct canReadBaton {
-    signalMap signalDefinitions;
+    readSignalMap signalDefinitions;
 
     // bus params
     int channel;
@@ -103,7 +107,7 @@ struct canReadBaton {
 
 // Data to pass to ProcessMessages
 struct canProcessReadBaton {
-    signalMap signalDefinitions;
+    readSignalMap signalDefinitions;
 
     // read side synchronization
     queue<canMessage*>* readQueue;
@@ -128,6 +132,7 @@ struct canCallbackBaton {
 
 // Data to pass to WriteMessages
 struct canProcessWriteBaton {
+    writeMessageMap messageDefinitions;
 
     // synchronization from javascript
     queue<canMessage*>* writeQueue;
@@ -159,11 +164,16 @@ struct canWriteBaton {
 
 Persistent<Object> context;  
 
+// Global write queue and synchronization
+queue<canSignal*>* lsWriteQueue;
+uv_mutex_t* lsWriteQueueLock;
+uv_cond_t* lsWriteQueueNotEmpty;
 
-// Creates a signalMap of ints and vectors
-signalMap createHsSignalMap() {
 
-  signalMap m = {
+// Creates a readSignalMap of ints and vectors
+readSignalMap createHsReadSignalMap() {
+
+  readSignalMap m = {
 
     {1954, signalDef(IS_NOT_EXTENDED, "batteryCurrent", IS_NOT_SIGNED, 48, 16, 0.025, -1000, "amps")},
     {1954, signalDef(IS_NOT_EXTENDED, "batteryVoltage", IS_NOT_SIGNED, 36, 12, 0.25, 0, "volts")},
@@ -191,11 +201,10 @@ signalMap createHsSignalMap() {
   return m;
 }
 
-// Creates a signalMap of ints and vectors
-signalMap createLsSignalMap() {
+// Creates a readSignalMap of ints and vectors
+readSignalMap createLsReadSignalMap() {
 
-  signalMap m = {
-
+  readSignalMap m = {
     {0x102AA000, signalDef(IS_EXTENDED, "gpsLatitude", IS_SIGNED, 32, 30, 1, 0, "deg")},
     {0x102AA000, signalDef(IS_EXTENDED, "gpsLongitude", IS_SIGNED, 0, 31, 1, 0, "deg")},
   };
@@ -203,8 +212,67 @@ signalMap createLsSignalMap() {
   return m;
 }
 
+writeMessageMap createLsWriteMessageMap() {
+  writeMessageMap m = {
+
+    {"Diagnostic Message", messageDef(
+      101, 0x000000003E01FE07, -1, 8)},
+
+    {"A/C(On/Off)", messageDef(
+      251, 0x000000010104AE07, -1, 8)},
+
+    {"Auto Temp(On/Off)", messageDef(
+      251, 0x000000080804AE07, -1, 8)},
+
+    {"Recirculate(On/Off)", messageDef(
+      251, 0x000000040404AE07, -1, 8)},
+
+    {"Rear Defrost(On/Off)", messageDef(
+      251, 0x000000101004AE07, -1, 8)},
+
+    {"Front Defrost(On/Off)", messageDef(
+      251, 0x000101000004AE07, -1, 8)},
+
+    {"Vent Top(On/Off)", messageDef(
+      251, 0x000000404004AE07, -1, 8)},
+
+    {"Vent Floor(On/Off)", messageDef(
+      251, 0x000000808004AE07, -1, 8)},
+
+    {"Vent Fan Speed", messageDef(
+      251, 0x000000000802AE07, 56, 8)},
+
+    {"Temp Inc/Dec Driver", messageDef(
+      251, 0x000000000102AE07, 32, 8)},
+
+    {"Temp Inc/Dec Passenger", messageDef(
+      251, 0x000000000202AE07, 32, 8)}
+  };
+
+  return m;
+}
+
+// Takes a value and string of a message
+// Returns a canMessage struct with an updated byte value to be written
+canMessage* WriteParse(writeMessageMap m, string name, unsigned long value) {
+  canMessage* c = new canMessage;
+  int startBit = m.at(name).startBit;
+  c->id = m.at(name).id;
+  c->length = m.at(name).length;
+  unsigned long message = m.at(name).message;
+  if (startBit != -1) {
+    message = (message + (value << startBit));
+  }
+  for (int i = 0; i < c->length; i++) {
+    c->data[i] = (unsigned char)message;
+    message = message >> 8;
+  }
+  // cout <<message<<endl;
+  return c;
+}
+
 // Takes an id and byte array and prints out the corresponding signal definitions
-vector<canSignal*> ReadParse(signalMap m, unsigned long id, unsigned char message[], unsigned int length) {
+vector<canSignal*> ReadParse(readSignalMap m, unsigned long id, unsigned char message[], unsigned int length) {
   unsigned long mask;
   double signal;
   unsigned long data = 0;
@@ -405,13 +473,13 @@ void ProcessWriteMessages(uv_work_t* req) {
         }
 
         // Pop the message information off the queue
-        baton->writeQueue->pop();
+        canSignal* signal = baton->writeQueue->pop();
 
         // Unlock queue while we send the message
         uv_mutex_unlock(baton->writeQueueLock);
 	
-        // PROCESS MESSAGE HERE: ARUSH's PART
-        canMessage *m = new canMessage;
+        // Process Message
+        canMessage *m = WriteParse(baton->messageDefinitions, signal->name, signal->value) {
 
         // Lock processedQueue
         uv_mutex_lock(baton->processedWriteQueueLock);
@@ -474,9 +542,37 @@ void SendWriteMessages(uv_work_t* req) {
     }
 }
 
+Handle<Value> Write(const Arguments& args) {
+
+    // All V8 functions need a scope
+    HandleScope scope;
+
+    if (args.length() < 2) {
+        return ThrowException(Exception::TypeError(String::New("You must pass two arguments")))       
+    }
+
+    canSignal* signal = new canSignal;
+    
+    String::Utf8Value param0(args[0]->ToString());
+    signal->name = std::string(*param0);    
+    signal->value = args[1]->ToInteger()->Value();
+
+    // Lock lsWriteQueue
+    uv_mutex_lock(lsWriteQueueLock);
+
+    lsWriteQueue->push(signal);
+
+    uv_mutex_unlock(lsWriteQueueLock);   
+
+    uv_cond_signal(lsWriteQueueNotEmpty); 
+
+    return Undefined();
+
+}
+
 /*
-Starts up all of our threads.
-Args should contain a callback function.
+    Starts up all of our threads.
+    Args should contain a callback function.
 */
 Handle<Value> Start(const Arguments& args) {
 
@@ -519,16 +615,16 @@ Handle<Value> Start(const Arguments& args) {
     uv_mutex_init(lsProcessedWriteQueueLock);
     uv_cond_init(lsProcessedWriteQueueNotEmpty);
 
-    // Initialize write synchronization
-    queue<canMessage*>* lsWriteQueue = new queue<canMessage*>();
-    uv_mutex_t* lsWriteQueueLock = new uv_mutex_t;
-    uv_cond_t* lsWriteQueueNotEmpty = new uv_cond_t;
+    // Initialize gloabl write synchronization
+    lsWriteQueue = new queue<canSignal*>();
+    lsWriteQueueLock = new uv_mutex_t;
+    lsWriteQueueNotEmpty = new uv_cond_t;
     uv_mutex_init(lsWriteQueueLock);
     uv_cond_init(lsWriteQueueNotEmpty);
 
     // Initialize HS read baton
     canReadBaton* hsCanReadBaton = new canReadBaton;
-    hsCanReadBaton->signalDefinitions = createHsSignalMap();
+    hsCanReadBaton->signalDefinitions = createHsReadSignalMap();
     hsCanReadBaton->channel = HS_CHANNEL;
     hsCanReadBaton->baudRate = HS_BAUD;
     hsCanReadBaton->tseg1 = HS_TSEG1;
@@ -543,7 +639,7 @@ Handle<Value> Start(const Arguments& args) {
 
     // Initialize LS read baton
     canReadBaton* lsCanReadBaton = new canReadBaton;
-    lsCanReadBaton->signalDefinitions = createLsSignalMap();
+    lsCanReadBaton->signalDefinitions = createLsReadSignalMap();
     lsCanReadBaton->channel = LS_CHANNEL;
     lsCanReadBaton->baudRate = LS_BAUD;
     lsCanReadBaton->tseg1 = LS_TSEG1;
@@ -558,7 +654,7 @@ Handle<Value> Start(const Arguments& args) {
 
     // Initialize HS read process baton
     canProcessBaton* canHsProcessReadBaton = new canProcessBaton;
-    canHsProcessReadBaton->signalDefinitions = createHsSignalMap();
+    canHsProcessReadBaton->signalDefinitions = createHsReadSignalMap();
     canHsProcessReadBaton->readQueue = hsReadQueue;
     canHsProcessReadBaton->readQueueLock = hsReadQueueLock;
     canHsProcessReadBaton->readQueueNotEmpty = hsReadQueueNotEmpty;
@@ -568,7 +664,7 @@ Handle<Value> Start(const Arguments& args) {
 
     // Initialize LS read process baton
     canProcessBaton* canLsProcessReadBaton = new canProcessBaton;
-    canLsProcessReadBaton->signalDefinitions = createLsSignalMap();
+    canLsProcessReadBaton->signalDefinitions = createLsReadSignalMap();
     canLsProcessReadBaton->readQueue = lsReadQueue;
     canLsProcessReadBaton->readQueueLock = lsReadQueueLock;
     canLsProcessReadBaton->readQueueNotEmpty = lsReadQueueNotEmpty;
@@ -594,6 +690,7 @@ Handle<Value> Start(const Arguments& args) {
 
     // Initialize LS write process baton
     canProcessWriteBaton* lsCanProcessWriteBaton = new canProcessWriteBaton;
+    lsCanProcessWriteBaton->messageDefinitions = createHsWriteSignalMap();
     lsCanProcessWriteBaton->writeQueue = lsWriteQueue;
     lsCanProcessWriteBaton->writeQueueLock = lsWriteQueueLock;
     lsCanProcessWriteBaton->writeQueueNotEmpty = lsWriteQueueNotEmpty;
@@ -643,6 +740,8 @@ void RegisterModule(Handle<Object> target) {
     context = Persistent<Object>::New(target);
     target->Set(String::NewSymbol("start"),
         FunctionTemplate::New(Start)->GetFunction());
+    target->Set(String::NewSymbol("write"),
+        FunctionTemplate::New(Write)->GetFunction());
 }
 
 NODE_MODULE(canReadWriter, RegisterModule);
