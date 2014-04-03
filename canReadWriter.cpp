@@ -51,16 +51,29 @@ struct signalDef {
     double scale;
     int offset;
     string unit;
-
-    signalDef(boolean isExtended, string nameSig, boolean isSigned, int startInt, int lengthInt, double scaleInt, int offsetInt, string unit) :
+s
+    signalDef(boolean isExtended, string name, boolean isSigned, int startBit, int length, double scale, int offset, string unit) :
     isExtended(isExtended),
-    name(nameSig),
+    name(name),
     isSigned(isSigned);
-    startBit(startInt),
-    length(lengthInt),
-    scale(scaleInt),
-    offset(offsetInt),
+    startBit(startBit),
+    length(length),
+    scale(scale),
+    offset(offset),
     unit(unit)  { }
+};
+
+struct messageDef {
+  long id;
+  unsigned long message;
+  int startBit;
+  int length;
+
+  messageDef(long id, unsigned long messageDefault, int startBit, int length) :
+    id(id),
+    message(messageDefault),
+    startBit(startBit),
+    length(length) { }
 };
 
 // Define readSignalMap data structure
