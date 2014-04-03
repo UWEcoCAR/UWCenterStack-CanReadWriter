@@ -228,27 +228,27 @@ readSignalMap createLsReadSignalMap() {
 writeMessageMap createLsWriteMessageMap() {
   writeMessageMap m = {
 
-    {"diagnosticMode", messageDef(0x101, 0x000000003E01FE07, -1, 8)},
+    {"diagnosticMode", messageDef(0x101, (unsigned long) 0x000000003E01FE07, -1, 8)},
 
-    {"toggleAc", messageDef(0x251, 0x000000010104AE07, -1, 8)},
+    {"toggleAc", messageDef(0x251, (unsigned long) 0x000000010104AE07, -1, 8)},
 
-    {"toggleAutoTemp", messageDef(0x251, 0x000000080804AE07, -1, 8)},
+    {"toggleAutoTemp", messageDef(0x251, (unsigned long) 0x000000080804AE07, -1, 8)},
 
-    {"toggleRecirculate", messageDef(0x251, 0x000000040404AE07, -1, 8)},
+    {"toggleRecirculate", messageDef(0x251, (unsigned long) 0x000000040404AE07, -1, 8)},
 
-    {"toggleRearDefrost", messageDef(0x251, 0x000000101004AE07, -1, 8)},
+    {"toggleRearDefrost", messageDef(0x251, (unsigned long) 0x000000101004AE07, -1, 8)},
 
-    {"toggleDefrost", messageDef(0x251, 0x000101000004AE07, -1, 8)},
+    {"toggleDefrost", messageDef(0x251, (unsigned long) 0x000101000004AE07, -1, 8)},
 
-    {"toggleTopVent", messageDef(0x251, 0x000000404004AE07, -1, 8)},
+    {"toggleTopVent", messageDef(0x251, (unsigned long) 0x000000404004AE07, -1, 8)},
 
-    {"toggleFloorVent", messageDef(0x251, 0x000000808004AE07, -1, 8)},
+    {"toggleFloorVent", messageDef(0x251, (unsigned long) 0x000000808004AE07, -1, 8)},
 
-    {"ventFanSpeed", messageDef(0x251, 0x000000000802AE07, 56, 8)},
+    {"ventFanSpeed", messageDef(0x251, (unsigned long) 0x000000000802AE07, 56, 8)},
 
-    {"driverTemp", messageDef(0x251, 0x000000000102AE07, 32, 8)},
+    {"driverTemp", messageDef(0x251, (unsigned long) 0x000000000102AE07, 32, 8)},
 
-    {"passengerTemp", messageDef(0x251, 0x000000000202AE07, 32, 8)}
+    {"passengerTemp", messageDef(0x251, (unsigned long) 0x000000000202AE07, 32, 8)}
   };
 
   return m;
@@ -291,6 +291,7 @@ vector<canSignal*> ReadParse(readSignalMap m, unsigned long id, unsigned char me
     signalDef ourSignal = it->second;
 
     // Mask out our signal
+    mask = ((1 << ourSignal.length) - 1) << ourSignal.startBit;
     long tempSignal = (data & mask) >> ourSignal.startBit;
 
     // If the signal is signed and negative, move the signed bit to the end (e.g. with length 6, 0b0...00101010 becomes 0b1...11101010)
