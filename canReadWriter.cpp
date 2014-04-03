@@ -102,7 +102,7 @@ struct canReadBaton {
 };
 
 // Data to pass to ProcessMessages
-struct canProcessBaton {
+struct canProcessReadBaton {
     signalMap signalDefinitions;
 
     // read side synchronization
@@ -111,9 +111,9 @@ struct canProcessBaton {
     uv_cond_t* readQueueNotEmpty;
 
     // processed side synchronization
-    queue<canSignal*>* processedQueue;
-    uv_mutex_t* processedQueueLock;
-    uv_async_t* processedAsync;
+    queue<canSignal*>* processedReadQueue;
+    uv_mutex_t* processedReadQueueLock;
+    uv_async_t* processedReadAsync;
 };
 
 // Data to pass to ExecuteCallbacks
@@ -122,8 +122,8 @@ struct canCallbackBaton {
     Persistent<Function> callback;
 
     // synchronization
-    queue<canSignal*>* processedQueue;
-    uv_mutex_t* processedQueueLock;
+    queue<canSignal*>* processedReadQueue;
+    uv_mutex_t* processedReadQueueLock;
 };
 
 // Data to pass to WriteMessages
@@ -204,45 +204,50 @@ signalMap createLsSignalMap() {
 }
 
 // Takes an id and byte array and prints out the corresponding signal definitions
-vector<canSignal*> Parse(signalMap m, unsigned long id, unsigned char message[], unsigned int byteLength) {
-  int length = byteLength;
+vector<canSignal*> ReadParse(signalMap m, unsigned long id, unsigned char message[], unsigned int length) {
   unsigned long mask;
   double signal;
   unsigned long data = 0;
   vector<canSignal*> signals;
+
+  // Convert message bytes into a single number (using Big-Endien layout).
   for (int i = 0; i < length; i++) {
-    data += ((unsigned long)message[i] << ((length-1-i)*8));
+    data += ((unsigned long) message[i] << ((length - 1 - i) * 8));
   }
+
+  // Parse out each of the signals
   auto range = m.equal_range(id);
   for (auto it = range.first; it != range.second; ++it) {
     signalDef ourSignal = it->second;
-    unsigned long ones = ((1 << ourSignal.length) - 1);
-    mask = ones << ourSignal.startBit;
-    unsigned long tempSignal = (data & mask) >> ourSignal.startBit;
 
-    if (ourSignal.isSigned) {
-      signal = (~tempSignal + 1) & ((1<<64 - 1) << ourSignal.startBit);
-      signal *= -1;
-    } else {
-      signal = tempSignal;
+    // Mask out our signal
+    long tempSignal = (data & mask) >> ourSignal.startBit;
+
+    // If the signal is signed and negative, move the signed bit to the end (e.g. with length 6, 0b0...00101010 becomes 0b1...11101010)
+    if (ourSignal.isSigned && tempSignal >> (ourSignal.length - 1) != 0) {
+      tempSignal = tempSignal | -1 << ourSignal.length;
     }
 
+    // Scale and offset signal
+    signal = (double) tempSignal;
     signal *= ourSignal.scale;
     signal += ourSignal.offset;
 
+    // Create canSignal
     canSignal* cSig = new canSignal;
     cSig->name = ourSignal.name;
     cSig->value = signal;
     cSig->unit = ourSignal.unit;
     signals.push_back(cSig);
   }
+
   return signals;
 }
 
 /*
-Fires the callback function for each signal in the processedQueue.
-This function should be signaled via the async when a signal is added to the processedQueue.
-This function must run in the V8 thread
+  Fires the callback function for each signal in the processedQueue.
+  This function should be signaled via the async when a signal is added to the processedQueue.
+  This function must run in the V8 thread
 */
 void ExecuteCallbacks(uv_async_t* handle, int status /*UNUSED*/) {
 
@@ -250,17 +255,17 @@ void ExecuteCallbacks(uv_async_t* handle, int status /*UNUSED*/) {
     canCallbackBaton* baton = (canCallbackBaton*) handle->data;
 
     // Lock the processedQueue
-    uv_mutex_lock(baton->processedQueueLock);
+    uv_mutex_lock(baton->processedReadQueueLock);
 
     // Run until it is empty
-    while (!baton->processedQueue->empty()) {
+    while (!baton->processedReadQueue->empty()) {
 
         // Dequeue a signal
-        canSignal* s = baton->processedQueue->front();
-        baton->processedQueue->pop();
+        canSignal* s = baton->processedReadQueue->front();
+        baton->processedReadQueue->pop();
 
         // Let others access the queue while we callback
-        uv_mutex_unlock(baton->processedQueueLock);
+        uv_mutex_unlock(baton->processedReadQueueLock);
 
         // Callback to the JS
         const unsigned argc = 2;
@@ -278,18 +283,18 @@ void ExecuteCallbacks(uv_async_t* handle, int status /*UNUSED*/) {
         delete s;
 
         // Regain the lock before looping again
-        uv_mutex_lock(baton->processedQueueLock);
+        uv_mutex_lock(baton->processedReadQueueLock);
     }
 
     // We are all finished with the queue, so let others fill it up
-    uv_mutex_unlock(baton->processedQueueLock);
+    uv_mutex_unlock(baton->processedReadQueueLock);
 }
 
 /*
-Constantly reads messages from a CAN bus using the baton's params (never exiting).
-Pushes messages onto the baton's readQueue.
-req->data should be a canReadBaton.
-Does not need to run in the V8 thread.
+  Constantly reads messages from a CAN bus using the baton's params (never exiting).
+  Pushes messages onto the baton's readQueue.
+  req->data should be a canReadBaton.
+  Does not need to run in the V8 thread.
 */
 void ReadMessages(uv_work_t* req) {
 
@@ -331,14 +336,14 @@ void ReadMessages(uv_work_t* req) {
 }
 
 /*
-Constantly processes messages from the hsReadQueue into signals that
-are placed on the processedQueue (never exiting).
-Does not need to run in the V8 thread.
+  Constantly processes messages from the hsReadQueue into signals that
+  are placed on the processedQueue (never exiting).
+  Does not need to run in the V8 thread.
 */
 void ProcessReadMessages(uv_work_t* req) {
 
     // Retrieve baton
-    canProcessBaton* baton = (canProcessBaton*) req->data;
+    canProcessReadBaton* baton = (canProcessReadBaton*) req->data;
 
     while (1) {
 
@@ -357,23 +362,23 @@ void ProcessReadMessages(uv_work_t* req) {
         // Unlock hsReadQueue while we process the message
         uv_mutex_unlock(baton->readQueueLock);
 
-        vector<canSignal*> signals = Parse(baton->signalDefinitions, m->id, m->data, m->length);
+        vector<canSignal*> signals = ReadParse(baton->signalDefinitions, m->id, m->data, m->length);
 
         // Lock processedQueue
-        uv_mutex_lock(baton->processedQueueLock);
+        uv_mutex_lock(baton->processedReadQueueLock);
 
         for (auto it = signals.begin(); it != signals.end(); ++it) {
-            baton->processedQueue->push(*it);
+            baton->processedReadQueue->push(*it);
         }
-        if (baton->processedQueue->size() >= 80) {
-            printf("WARNING: There are %lu unfired signals\n", baton->processedQueue->size());
+        if (baton->processedReadQueue->size() >= 80) {
+            printf("WARNING: There are %lu unfired signals\n", baton->processedReadQueue->size());
         }
 
         // Unlock processedQueue while we go back to waiting for messages
-        uv_mutex_unlock(baton->processedQueueLock);
+        uv_mutex_unlock(baton->processedReadQueueLock);
 
         // Signal the async that there are signals to fire
-        uv_async_send(baton->processedAsync);
+        uv_async_send(baton->processedReadAsync);
 
         // Clean up
         delete m;
@@ -381,9 +386,9 @@ void ProcessReadMessages(uv_work_t* req) {
 }
 
 /*
-Constantly processes messages from writeQueue (never exits).
-req->data should be a canProcessWriteBaton.
-Does not need to run in the V8 thread.
+  Constantly processes messages from writeQueue (never exits).
+  req->data should be a canProcessWriteBaton.
+  Does not need to run in the V8 thread.
 */
 void ProcessWriteMessages(uv_work_t* req) {
 
@@ -410,7 +415,8 @@ void ProcessWriteMessages(uv_work_t* req) {
 
         // Lock processedQueue
         uv_mutex_lock(baton->processedWriteQueueLock);
-	// Add message to processed queue
+	     
+        // Add message to processed queue
         baton->processedWriteQueue->push(m);
 
         if (baton->processedWriteQueue->size() > 80) {
@@ -477,9 +483,6 @@ Handle<Value> Start(const Arguments& args) {
     // All V8 functions need a scope
     HandleScope scope;
 
-    // Initialize signalDefintions
-    signalMap signalDefinitions = createHsSignalMap();
-
     // Initialize HS read synchronization
     queue<canMessage*>* hsReadQueue = new queue<canMessage*>();
     uv_mutex_t* hsReadQueueLock = new uv_mutex_t;
@@ -487,20 +490,27 @@ Handle<Value> Start(const Arguments& args) {
     uv_mutex_init(hsReadQueueLock);
     uv_cond_init(hsReadQueueNotEmpty);
 
-    // Initialize processed synchronization
-    queue<canSignal*>* processedQueue = new queue<canSignal*>();
-    uv_mutex_t* processedQueueLock = new uv_mutex_t;
-    uv_mutex_init(processedQueueLock);
+    // Initialize LS read synchronization
+    queue<canMessage*>* lsReadQueue = new queue<canMessage*>();
+    uv_mutex_t* lsReadQueueLock = new uv_mutex_t;
+    uv_cond_t* lsReadQueueNotEmpty = new uv_cond_t;
+    uv_mutex_init(lsReadQueueLock);
+    uv_cond_init(lsReadQueueNotEmpty);
 
-    // Initialize processedAsync baton
-    canCallbackBaton* processedAsyncBaton = new canCallbackBaton;
-    processedAsyncBaton->processedQueue = processedQueue;
-    processedAsyncBaton->processedQueueLock = processedQueueLock;
+    // Initialize read processed synchronization
+    queue<canSignal*>* processedReadQueue = new queue<canSignal*>();
+    uv_mutex_t* processedReadQueueLock = new uv_mutex_t;
+    uv_mutex_init(processedReadQueueLock);
+
+    // Initialize processedReadAsync baton
+    canReadCallbackBaton* processedAsyncBaton = new canReadCallbackBaton;
+    processedAsyncBaton->processedReadQueue = processedReadQueue;
+    processedAsyncBaton->processedReadQueueLock = processedReadQueueLock;
     processedAsyncBaton->callback = Persistent<Function>::New(Local<Function>::Cast(args[0]));
 
-    // Initialize processedAsync
-    uv_async_t* processedAsync = new uv_async_t;
-    processedAsync->data = (void*) processedAsyncBaton;
+    // Initialize processedReadAsync
+    uv_async_t* processedReadAsync = new uv_async_t;
+    processedReadAsync->data = (void*) processedReadAsyncBaton;
 
     // Initialize processed write synchronization
     queue<canMessage*>* lsProcessedWriteQueue = new queue<canMessage*>();
@@ -518,7 +528,7 @@ Handle<Value> Start(const Arguments& args) {
 
     // Initialize HS read baton
     canReadBaton* hsCanReadBaton = new canReadBaton;
-    hsCanReadBaton->signalDefinitions = signalDefinitions;
+    hsCanReadBaton->signalDefinitions = createHsSignalMap();
     hsCanReadBaton->channel = HS_CHANNEL;
     hsCanReadBaton->baudRate = HS_BAUD;
     hsCanReadBaton->tseg1 = HS_TSEG1;
@@ -533,41 +543,56 @@ Handle<Value> Start(const Arguments& args) {
 
     // Initialize LS read baton
     canReadBaton* lsCanReadBaton = new canReadBaton;
-    lsCanReadBaton->signalDefinitions = signalDefinitions;
-    lsCanReadBaton->channel = HS_CHANNEL;
-    lsCanReadBaton->baudRate = HS_BAUD;
-    lsCanReadBaton->tseg1 = HS_TSEG1;
-    lsCanReadBaton->tseg2 = HS_TSEG2;
-    lsCanReadBaton->sjw = HS_SJW;
-    lsCanReadBaton->samplePoints = HS_SAMPLE_POINTS;
-    lsCanReadBaton->syncMode = HS_SYNC_MODE;
-    lsCanReadBaton->canFlags = HS_FLAGS;
-    lsCanReadBaton->readQueue = hsReadQueue;
-    lsCanReadBaton->readQueueLock = hsReadQueueLock;
-    lsCanReadBaton->readQueueNotEmpty = hsReadQueueNotEmpty;
+    lsCanReadBaton->signalDefinitions = createLsSignalMap();
+    lsCanReadBaton->channel = LS_CHANNEL;
+    lsCanReadBaton->baudRate = LS_BAUD;
+    lsCanReadBaton->tseg1 = LS_TSEG1;
+    lsCanReadBaton->tseg2 = LS_TSEG2;
+    lsCanReadBaton->sjw = LS_SJW;
+    lsCanReadBaton->samplePoints = LS_SAMPLE_POINTS;
+    lsCanReadBaton->syncMode = LS_SYNC_MODE;
+    lsCanReadBaton->canFlags = LS_FLAGS;
+    lsCanReadBaton->readQueue = lsReadQueue;
+    lsCanReadBaton->readQueueLock = lsReadQueueLock;
+    lsCanReadBaton->readQueueNotEmpty = lsReadQueueNotEmpty;
 
-    // Initialize read process baton
-    canProcessBaton* canReadProcessBaton = new canProcessBaton;
-    canReadProcessBaton->signalDefinitions = signalDefinitions;
-    canReadProcessBaton->lsReadQueue = lsReadQueue;
-    canReadProcessBaton->lsReadQueueLock = lsReadQueueLock;
-    canReadProcessBaton->lsReadQueueNotEmpty = lsReadQueueNotEmpty;
-    canReadProcessBaton->hsReadQueue = hsReadQueue;
-    canReadProcessBaton->hsReadQueueLock = hsReadQueueLock;
-    canReadProcessBaton->hsReadQueueNotEmpty = hsReadQueueNotEmpty;
-    canReadProcessBaton->processedQueue = processedQueue;
-    canReadProcessBaton->processedQueueLock = processedQueueLock;
-    canReadProcessBaton->processedAsync = processedAsync;
+    // Initialize HS read process baton
+    canProcessBaton* canHsProcessReadBaton = new canProcessBaton;
+    canHsProcessReadBaton->signalDefinitions = createHsSignalMap();
+    canHsProcessReadBaton->readQueue = hsReadQueue;
+    canHsProcessReadBaton->readQueueLock = hsReadQueueLock;
+    canHsProcessReadBaton->readQueueNotEmpty = hsReadQueueNotEmpty;
+    canHsProcessReadBaton->processedQueue = processedReadQueue;
+    canHsProcessReadBaton->processedQueueLock = processedReadQueueLock;
+    canHsProcessReadBaton->processedAsync = processedReadAsync;
+
+    // Initialize LS read process baton
+    canProcessBaton* canLsProcessReadBaton = new canProcessBaton;
+    canLsProcessReadBaton->signalDefinitions = createLsSignalMap();
+    canLsProcessReadBaton->readQueue = lsReadQueue;
+    canLsProcessReadBaton->readQueueLock = lsReadQueueLock;
+    canLsProcessReadBaton->readQueueNotEmpty = lsReadQueueNotEmpty;
+    canLsProcessReadBaton->processedQueue = processedReadQueue;
+    canLsProcessReadBaton->processedQueueLock = processedReadQueueLock;
+    canLsProcessReadBaton->processedAsync = processedReadAsync;
 
     // Initialize HS read work request
     uv_work_t* hsReadReq = new uv_work_t();
     hsReadReq->data = (void*) hsCanReadBaton;
 
-    // Initialize read process work request
-    uv_work_t* readProcessReq = new uv_work_t();
-    readProcessReq->data = (void*) canProcessBaton;
+    // Initialize LS read work request
+    uv_work_t* lsReadReq = new uv_work_t();
+    lsReadReq->data = (void*) lsCanReadBaton;
 
-    // Initialize LS process baton
+    // Initialize HS read process work request
+    uv_work_t* hsProcessReadReq = new uv_work_t();
+    hsProcessReadReq->data = (void*) canHsProcessReadBaton;
+
+    // Initialize LS read process work request
+    uv_work_t* lsProcessReadReq = new uv_work_t();
+    lsProcessReadReq->data = (void*) canLsProcessReadBaton;
+
+    // Initialize LS write process baton
     canProcessWriteBaton* lsCanProcessWriteBaton = new canProcessWriteBaton;
     lsCanProcessWriteBaton->writeQueue = lsWriteQueue;
     lsCanProcessWriteBaton->writeQueueLock = lsWriteQueueLock;
@@ -600,9 +625,11 @@ Handle<Value> Start(const Arguments& args) {
      
     // Start all our threads
     uv_loop_t* loop = uv_default_loop();
-    uv_async_init(loop, processedAsync, ExecuteCallbacks);
+    uv_async_init(loop, readProcessedAsync, ExecuteCallbacks);
     uv_queue_work(loop, hsReadReq, ReadMessages, NULL);
-    uv_queue_work(loop, hsProcessReq, ProcessMessages, NULL);
+    uv_queue_work(loop, lsReadReq, ReadMessages, NULL);
+    uv_queue_work(loop, hsProcessReadReq, ProcessMessages, NULL);
+    uv_queue_work(loop, lsProcessReadReq, ProcessMessages, NULL);
     uv_queue_work(loop, lsProcessWriteReq, ProcessWriteMessages, NULL);
     uv_queue_work(loop, lsWriteReq, SendWriteMessages, NULL);
 
