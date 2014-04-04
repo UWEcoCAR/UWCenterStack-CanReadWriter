@@ -52,15 +52,28 @@ struct signalDef {
     int offset;
     string unit;
 
-    signalDef(bool isExtended, string nameSig, bool isSigned, int startInt, int lengthInt, double scaleInt, int offsetInt, string unit) :
+    signalDef(bool isExtended, string name, bool isSigned, int startBit, int length, double scale, int offset, string unit) :
     isExtended(isExtended),
-    name(nameSig),
+    name(name),
     isSigned(isSigned),
-    startBit(startInt),
-    length(lengthInt),
-    scale(scaleInt),
-    offset(offsetInt),
+    startBit(startBit),
+    length(length),
+    scale(scale),
+    offset(offset),
     unit(unit)  { }
+};
+
+struct messageDef {
+  long id;
+  unsigned long message;
+  int startBit;
+  int length;
+
+  messageDef(long id, unsigned long messageDefault, int startBit, int length) :
+    id(id),
+    message(messageDefault),
+    startBit(startBit),
+    length(length) { }
 };
 
 // Define readSignalMap data structure
@@ -215,38 +228,27 @@ readSignalMap createLsReadSignalMap() {
 writeMessageMap createLsWriteMessageMap() {
   writeMessageMap m = {
 
-    {"Diagnostic Message", messageDef(
-      101, 0x000000003E01FE07, -1, 8)},
+    {"diagnosticMode", messageDef(0x101, 0x000000003E01FE07, -1, 8)},
 
-    {"A/C(On/Off)", messageDef(
-      251, 0x000000010104AE07, -1, 8)},
+    {"toggleAc", messageDef(0x251, 0x000000010104AE07, -1, 8)},
 
-    {"Auto Temp(On/Off)", messageDef(
-      251, 0x000000080804AE07, -1, 8)},
+    {"toggleAutoTemp", messageDef(0x251, 0x000000080804AE07, -1, 8)},
 
-    {"Recirculate(On/Off)", messageDef(
-      251, 0x000000040404AE07, -1, 8)},
+    {"toggleRecirculate", messageDef(0x251, 0x000000040404AE07, -1, 8)},
 
-    {"Rear Defrost(On/Off)", messageDef(
-      251, 0x000000101004AE07, -1, 8)},
+    {"toggleRearDefrost", messageDef(0x251, 0x000000101004AE07, -1, 8)},
 
-    {"Front Defrost(On/Off)", messageDef(
-      251, 0x000101000004AE07, -1, 8)},
+    {"toggleDefrost", messageDef(0x251, 0x000101000004AE07, -1, 8)},
 
-    {"Vent Top(On/Off)", messageDef(
-      251, 0x000000404004AE07, -1, 8)},
+    {"toggleTopVent", messageDef(0x251, 0x000000404004AE07, -1, 8)},
 
-    {"Vent Floor(On/Off)", messageDef(
-      251, 0x000000808004AE07, -1, 8)},
+    {"toggleFloorVent", messageDef(0x251, 0x000000808004AE07, -1, 8)},
 
-    {"Vent Fan Speed", messageDef(
-      251, 0x000000000802AE07, 56, 8)},
+    {"ventFanSpeed", messageDef(0x251, 0x000000000802AE07, 56, 8)},
 
-    {"Temp Inc/Dec Driver", messageDef(
-      251, 0x000000000102AE07, 32, 8)},
+    {"driverTemp", messageDef(0x251, 0x000000000102AE07, 32, 8)},
 
-    {"Temp Inc/Dec Passenger", messageDef(
-      251, 0x000000000202AE07, 32, 8)}
+    {"passengerTemp", messageDef(0x251, 0x000000000202AE07, 32, 8)}
   };
 
   return m;
@@ -553,7 +555,7 @@ Handle<Value> Write(const Arguments& args) {
     }
 
     canSignal* signal = new canSignal;
-    
+
     String::Utf8Value param0(args[0]->ToString());
     signal->name = std::string(*param0);    
     signal->value = args[1]->ToInteger()->Value();
