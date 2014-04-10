@@ -396,6 +396,8 @@ void ReadMessages(uv_work_t* req) {
         uv_mutex_lock(baton->readQueueLock);
         baton->readQueue->push(m);
 
+        printf("ADDED message %lu to READ queue\n", m->id);
+
         if (baton->readQueue->size() >= 10) {
             printf("WARNING: There are %lu unprocessed messages\n", baton->readQueue->size());
         }
@@ -430,6 +432,8 @@ void ProcessReadMessages(uv_work_t* req) {
         canMessage* m = baton->readQueue->front();
         baton->readQueue->pop();
 
+        printf("REMOVED message %lu from READ queue\n", m->id);
+
         // Unlock hsReadQueue while we process the message
         uv_mutex_unlock(baton->readQueueLock);
 
@@ -444,6 +448,8 @@ void ProcessReadMessages(uv_work_t* req) {
         if (baton->processedReadQueue->size() >= 80) {
             printf("WARNING: There are %lu unfired signals\n", baton->processedReadQueue->size());
         }
+
+        printf("ADDED message to PROCESSED READ queue\n");
 
         // Unlock processedQueue while we go back to waiting for messages
         uv_mutex_unlock(baton->processedReadQueueLock);
@@ -479,6 +485,8 @@ void ProcessWriteMessages(uv_work_t* req) {
         canSignal* signal = baton->writeQueue->front();
 	baton->writeQueue->pop();
 
+        printf("REMOVED message from WRITE queue\n");
+
         // Unlock queue while we send the message
         uv_mutex_unlock(baton->writeQueueLock);
 	
@@ -490,6 +498,8 @@ void ProcessWriteMessages(uv_work_t* req) {
 	     
         // Add message to processed queue
         baton->processedWriteQueue->push(m);
+
+        printf("ADDED message to WRITE PROCESSED queue\n");
 
         if (baton->processedWriteQueue->size() > 80) {
             printf("WARNING: There are %lu unprocessed messages\n", baton->processedWriteQueue->size());
@@ -510,7 +520,7 @@ req->data should be a canReadBaton.
 Does not need to run in the V8 thread.
 */
 void SendWriteMessages(uv_work_t* req) {
-    
+        
     // Retrieve baton
     canWriteBaton* baton = (canWriteBaton*) req->data;
     canHandle handle = canOpenChannel(baton->channel, baton->canFlags);
@@ -534,6 +544,8 @@ void SendWriteMessages(uv_work_t* req) {
         // Pop the message off the queue
         canMessage* m = baton->processedWriteQueue->front();
         baton->processedWriteQueue->pop();
+
+        printf("REMOVED message from WRITE PROCESSED queue\n");
 
         // Unlock queue while we send the message
         uv_mutex_unlock(baton->processedWriteQueueLock);
@@ -565,6 +577,8 @@ Handle<Value> Write(const Arguments& args) {
     uv_mutex_lock(lsWriteQueueLock);
 
     lsWriteQueue->push(signal);
+
+    printf("ADDED message to WRITE queue\n");
 
     uv_mutex_unlock(lsWriteQueueLock);   
 
