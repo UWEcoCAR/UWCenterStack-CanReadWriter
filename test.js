@@ -4,4 +4,4 @@ var _ = require('underscore');
 
 console.log("---- Starting Tests ----");
 
-canReadWriter.write('ventFanSpeed', 100);
+setInterval(function() { canReadWriter.write('ventFanSpeed', 0); }, 1000);

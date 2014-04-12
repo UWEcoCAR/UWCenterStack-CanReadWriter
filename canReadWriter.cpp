@@ -218,8 +218,8 @@ readSignalMap createHsReadSignalMap() {
 readSignalMap createLsReadSignalMap() {
 
   readSignalMap m = {
-    {0x102AA000, signalDef(IS_EXTENDED, "gpsLatitude", IS_SIGNED, 32, 30, 1, 0, "deg")},
-    {0x102AA000, signalDef(IS_EXTENDED, "gpsLongitude", IS_SIGNED, 0, 31, 1, 0, "deg")},
+    {0x102AA000, signalDef(IS_EXTENDED, "gpsLatitude", IS_SIGNED, 32, 30, 1.0/3600000, 0, "deg")},
+    {0x102AA000, signalDef(IS_EXTENDED, "gpsLongitude", IS_SIGNED, 0, 31, 1.0/3600000, 0, "deg")},
   };
 
   return m;
@@ -265,7 +265,7 @@ canMessage* WriteParse(writeMessageMap m, string name, unsigned long value) {
   if (startBit != -1) {
     message = (message + (value << startBit));
   }
-  for (int i = 0; i < c->length; i++) {
+  for (int i = 0; i < (int) c->length; i++) {
     c->data[i] = (unsigned char)message;
     message = message >> 8;
   }
@@ -281,8 +281,8 @@ vector<canSignal*> ReadParse(readSignalMap m, unsigned long id, unsigned char me
   vector<canSignal*> signals;
 
   // Convert message bytes into a single number (using Big-Endien layout).
-  for (int i = 0; i < length; i++) {
-    data += ((unsigned long) message[i] << ((length - 1 - i) * 8));
+  for (int i = 0; i < (int) length; i++) {
+    data += (unsigned long) message[i] << ((length - 1 - i) * 8);
   }
 
   // Parse out each of the signals
@@ -291,7 +291,7 @@ vector<canSignal*> ReadParse(readSignalMap m, unsigned long id, unsigned char me
     signalDef ourSignal = it->second;
 
     // Mask out our signal
-    mask = ((1 << ourSignal.length) - 1) << ourSignal.startBit;
+    mask = ((1l << ourSignal.length) - 1) << ourSignal.startBit;
     long tempSignal = (data & mask) >> ourSignal.startBit;
 
     // If the signal is signed and negative, move the signed bit to the end (e.g. with length 6, 0b0...00101010 becomes 0b1...11101010)
@@ -367,10 +367,10 @@ void ExecuteCallbacks(uv_async_t* handle, int status /*UNUSED*/) {
   req->data should be a canReadBaton.
   Does not need to run in the V8 thread.
 */
-void ReadMessages(uv_work_t* req) {
+void ReadMessages(void* arg) {
 
     // Retrieve baton
-    canReadBaton* baton = (canReadBaton*) req->data;
+    canReadBaton* baton = (canReadBaton*) arg;
 
     canHandle handle = canOpenChannel(baton->channel, baton->canFlags);
     if (handle < 0) {
@@ -388,6 +388,11 @@ void ReadMessages(uv_work_t* req) {
         canMessage* m = new canMessage;
         canReadWait(handle, &m->id, m->data, &m->length, &flags, &timestamp, 0xFFFFFFFF);
 
+        if (flags & canMSG_EXT) {
+            long mask = ((1 << 16) - 1) << 13;
+            m->id = m->id & mask;
+        }
+
         if (baton->signalDefinitions.count(m->id) == 0) {
             continue;
         }
@@ -395,8 +400,6 @@ void ReadMessages(uv_work_t* req) {
         // Add message to readQueue
         uv_mutex_lock(baton->readQueueLock);
         baton->readQueue->push(m);
-
-        printf("ADDED message %lu to READ queue\n", m->id);
 
         if (baton->readQueue->size() >= 10) {
             printf("WARNING: There are %lu unprocessed messages\n", baton->readQueue->size());
@@ -413,10 +416,10 @@ void ReadMessages(uv_work_t* req) {
   are placed on the processedQueue (never exiting).
   Does not need to run in the V8 thread.
 */
-void ProcessReadMessages(uv_work_t* req) {
+void ProcessReadMessages(void* arg) {
 
     // Retrieve baton
-    canProcessReadBaton* baton = (canProcessReadBaton*) req->data;
+    canProcessReadBaton* baton = (canProcessReadBaton*) arg;
 
     while (1) {
 
@@ -432,8 +435,6 @@ void ProcessReadMessages(uv_work_t* req) {
         canMessage* m = baton->readQueue->front();
         baton->readQueue->pop();
 
-        printf("REMOVED message %lu from READ queue\n", m->id);
-
         // Unlock hsReadQueue while we process the message
         uv_mutex_unlock(baton->readQueueLock);
 
@@ -444,12 +445,10 @@ void ProcessReadMessages(uv_work_t* req) {
 
         for (auto it = signals.begin(); it != signals.end(); ++it) {
             baton->processedReadQueue->push(*it);
-        }
+            printf("%s %lf\n", (*it)->name.c_str(), (*it)->value);        }
         if (baton->processedReadQueue->size() >= 80) {
             printf("WARNING: There are %lu unfired signals\n", baton->processedReadQueue->size());
         }
-
-        printf("ADDED message to PROCESSED READ queue\n");
 
         // Unlock processedQueue while we go back to waiting for messages
         uv_mutex_unlock(baton->processedReadQueueLock);
@@ -467,11 +466,11 @@ void ProcessReadMessages(uv_work_t* req) {
   req->data should be a canProcessWriteBaton.
   Does not need to run in the V8 thread.
 */
-void ProcessWriteMessages(uv_work_t* req) {
+void ProcessWriteMessages(void* arg) {
 
     // Retrieve baton
-    canProcessWriteBaton* baton = (canProcessWriteBaton*) req->data;
-
+    canProcessWriteBaton* baton = (canProcessWriteBaton*) arg;
+        
     while (1) {
         // Lock writeQueue
         uv_mutex_lock(baton->writeQueueLock);
@@ -483,9 +482,7 @@ void ProcessWriteMessages(uv_work_t* req) {
 
         // Pop the message information off the queue
         canSignal* signal = baton->writeQueue->front();
-	baton->writeQueue->pop();
-
-        printf("REMOVED message from WRITE queue\n");
+	    baton->writeQueue->pop();
 
         // Unlock queue while we send the message
         uv_mutex_unlock(baton->writeQueueLock);
@@ -498,8 +495,6 @@ void ProcessWriteMessages(uv_work_t* req) {
 	     
         // Add message to processed queue
         baton->processedWriteQueue->push(m);
-
-        printf("ADDED message to WRITE PROCESSED queue\n");
 
         if (baton->processedWriteQueue->size() > 80) {
             printf("WARNING: There are %lu unprocessed messages\n", baton->processedWriteQueue->size());
@@ -519,10 +514,10 @@ Constantly sends messages from processedWriteQueue.
 req->data should be a canReadBaton.
 Does not need to run in the V8 thread.
 */
-void SendWriteMessages(uv_work_t* req) {
+void SendWriteMessages(void* arg) {
         
     // Retrieve baton
-    canWriteBaton* baton = (canWriteBaton*) req->data;
+    canWriteBaton* baton = (canWriteBaton*) arg;
     canHandle handle = canOpenChannel(baton->channel, baton->canFlags);
     if (handle < 0) {
       printf("ERROR: canOpenChannel %d failed: %d\n", baton->channel, handle);
@@ -544,8 +539,6 @@ void SendWriteMessages(uv_work_t* req) {
         // Pop the message off the queue
         canMessage* m = baton->processedWriteQueue->front();
         baton->processedWriteQueue->pop();
-
-        printf("REMOVED message from WRITE PROCESSED queue\n");
 
         // Unlock queue while we send the message
         uv_mutex_unlock(baton->processedWriteQueueLock);
@@ -578,11 +571,9 @@ Handle<Value> Write(const Arguments& args) {
 
     lsWriteQueue->push(signal);
 
-    printf("ADDED message to WRITE queue\n");
-
     uv_mutex_unlock(lsWriteQueueLock);   
 
-    uv_cond_signal(lsWriteQueueNotEmpty); 
+    uv_cond_signal(lsWriteQueueNotEmpty);
 
     return Undefined();
 
@@ -738,15 +729,24 @@ Handle<Value> Start(const Arguments& args) {
     uv_work_t* lsWriteReq = new uv_work_t();
     lsWriteReq->data = (void*) lsCanWriteBaton;
      
-    // Start all our threads
+    // Start all our threads        
     uv_loop_t* loop = uv_default_loop();
     uv_async_init(loop, processedReadAsync, ExecuteCallbacks);
-    uv_queue_work(loop, hsReadReq, ReadMessages, NULL);
-    uv_queue_work(loop, lsReadReq, ReadMessages, NULL);
-    uv_queue_work(loop, hsProcessReadReq, ProcessReadMessages, NULL);
-    uv_queue_work(loop, lsProcessReadReq, ProcessReadMessages, NULL);
-    uv_queue_work(loop, lsProcessWriteReq, ProcessWriteMessages, NULL);
-    uv_queue_work(loop, lsWriteReq, SendWriteMessages, NULL);
+
+    uv_thread_t lsReadId;
+    uv_thread_t lsReadProcessId;
+    uv_thread_create(&lsReadId, ReadMessages, lsCanReadBaton);
+    uv_thread_create(&lsReadProcessId, ProcessReadMessages, canLsProcessReadBaton);
+
+    uv_thread_t hsReadId;
+    uv_thread_t hsReadProcessId;
+    uv_thread_create(&hsReadId, ReadMessages, hsCanReadBaton);
+    uv_thread_create(&hsReadProcessId, ProcessReadMessages, canHsProcessReadBaton);
+    
+    uv_thread_t writeProcessId;
+    uv_thread_t writeSendId;
+    uv_thread_create(&writeProcessId, ProcessWriteMessages, lsCanProcessWriteBaton);
+    uv_thread_create(&writeSendId, SendWriteMessages, lsCanWriteBaton);
 
     return Undefined();
 }
