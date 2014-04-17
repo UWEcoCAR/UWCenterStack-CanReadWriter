@@ -3,10 +3,5 @@ var canReadWriter = new CanReadWriter();
 var _ = require('underscore');
 
 console.log("---- Starting Tests ----");
-var signals = ['batteryVoltage', 'batteryCurrent'];
-_.each(signals, function(signal) {
-	canReadWriter.on(signal, function(value) {
-		console.log(signal + ': ' + value);
-	});	
-});
 
+setInterval(function() { canReadWriter.write('ventFanSpeed', 0); }, 1000);

@@ -10,3 +10,5 @@ var CanReadWriter = module.exports = function() {
 };
 
 util.inherits(CanReadWriter, events.EventEmitter);
+
+CanReadWriter.prototype.write = canReadWriter.write;
