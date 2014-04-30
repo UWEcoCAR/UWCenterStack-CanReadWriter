@@ -1,4 +1,5 @@
 var canReadWriter = require('./build/Release/canReadWriter');
+var _ = require('underscore');
 var events = require('events');
 var util = require('util');
 
