@@ -1,10 +1,10 @@
 {
   "name": "uwcenterstack-canreadwriter",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "main": "./CanReadWriter.js",
-  "repository" : {
-    "type" : "git",
-    "url" : "http://github.com/UWEcoCAR2/UWCenterStack-CanReadWriter.git"
+  "repository": {
+    "type": "git",
+    "url": "http://github.com/UWEcoCAR2/UWCenterStack-CanReadWriter.git"
   },
   "devDependencies": {
     "chai": "~1.9.0",
