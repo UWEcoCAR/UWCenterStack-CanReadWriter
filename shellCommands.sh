@@ -5,13 +5,13 @@ export PATH=$PATH:/usr/local/share/npm/bin
 alias uwcs-crw='cd $UWCENTERSTACK_CANREADWRITER_HOME'
 
 # uwcs-crw-init - Downloads dependencies and rebuilds module
-alias uwcs-crw-init='cd $UWCENTERSTACK_CANREADWRITER_HOME && npm install'
+alias uwcs-crw-init='uwcs-crw && npm install'
 
 # uwcs-crw-build - Recompiles the C++
-alias uwcs-crw-rebuild='cd $UWCENTERSTACK_CANREADWRITER_HOME && npm build .'
+alias uwcs-crw-rebuild='uwcs-crw && npm build .'
 
 # uwcs-crw-test - Runs the test file
-alias uwcs-crw-test='cd $UWCENTERSTACK_CANREADWRITER_HOME && node test.js'
+alias uwcs-crw-test='uwcs-crw && node test.js'
 
 # uwcs-crw-publish - Pushes the package to npm
-alias uwcs-crw-publish='cd $UWCENTERSTACK_CANREADWRITER_HOME && npm version patch && npm publish'
+alias uwcs-crw-publish='uwcs-crw && npm version patch && npm publish'
