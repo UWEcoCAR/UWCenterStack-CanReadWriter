@@ -209,6 +209,8 @@ readSignalMap createHsReadSignalMap() {
 
     {1957, signalDef(IS_NOT_EXTENDED, "chargerCurrent", IS_NOT_SIGNED, 32, 16, 0.01, 0, "A")},
     {1957, signalDef(IS_NOT_EXTENDED, "chargerVoltage", IS_NOT_SIGNED, 48, 16, 0.1, 0, "V")},
+
+    {1958, signalDef(IS_NOT_EXTENDED, "fuelConsumption", IS_NOT_SIGNED, 52, 12, 0.025, 0, "L/hr")},
   };
 
   return m;
