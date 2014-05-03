@@ -7,7 +7,7 @@ var CanReadWriter = module.exports = function() {
     var self = this;
     this._mailbox = {};
     return canReadWriter.start(function(name, value) {
-        mailbox[name] = value;
+        self._mailbox[name] = value;
         self.emit(name, value);
     });
 };
