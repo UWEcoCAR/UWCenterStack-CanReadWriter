@@ -344,7 +344,7 @@ void ExecuteCallbacks(uv_async_t* handle, int status /*UNUSED*/) {
         const unsigned argc = 2;
         Local<Value> argv[argc] = {
             Local<Value>::New(String::New(s->name.c_str())),
-            Local<Value>::New(Integer::New(s->value))
+            Local<Value>::New(Number::New(s->value))
         };
         TryCatch tryCatch;
         baton->callback->Call(context, argc, argv);
