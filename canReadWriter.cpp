@@ -177,10 +177,15 @@ struct canWriteBaton {
 
 Persistent<Object> context;  
 
-// Global write queue and synchronization
+// Global ls write queue and synchronization
 queue<canSignal*>* lsWriteQueue;
 uv_mutex_t* lsWriteQueueLock;
 uv_cond_t* lsWriteQueueNotEmpty;
+
+// Global hs write queue and synchronization
+queue<canSignal*>* hsWriteQueue;
+uv_mutex_t* hsWriteQueueLock;
+uv_cond_t* hsWriteQueueNotEmpty;
 
 
 // Creates a readSignalMap of ints and vectors
@@ -204,8 +209,8 @@ readSignalMap createHsReadSignalMap() {
     {1956, signalDef(IS_NOT_EXTENDED, "transGear", IS_NOT_SIGNED, 19, 4, 1, 0, "")},
     {1956, signalDef(IS_NOT_EXTENDED, "vehicleBrake", IS_NOT_SIGNED, 23, 1, 1, 0, "")},
     {1956, signalDef(IS_NOT_EXTENDED, "vehicleAccel", IS_NOT_SIGNED, 24, 8, 0.392156862745098, 0, "%")},
-    {1956, signalDef(IS_NOT_EXTENDED, "motorTorque", IS_NOT_SIGNED, 32, 16, 0.1, 0, "Nm")},
-    {1956, signalDef(IS_NOT_EXTENDED, "motorRpm", IS_NOT_SIGNED, 48, 16, 1, 0, "rpm")},
+    {1956, signalDef(IS_NOT_EXTENDED, "motorTorque", IS_SIGNED, 32, 16, 0.1, 0, "Nm")},
+    {1956, signalDef(IS_NOT_EXTENDED, "motorRpm", IS_SIGNED, 48, 16, 1, 0, "rpm")},
 
     {1957, signalDef(IS_NOT_EXTENDED, "chargerCurrent", IS_NOT_SIGNED, 32, 16, 0.01, 0, "A")},
     {1957, signalDef(IS_NOT_EXTENDED, "chargerVoltage", IS_NOT_SIGNED, 48, 16, 0.1, 0, "V")},
@@ -256,6 +261,15 @@ writeMessageMap createLsWriteMessageMap() {
   return m;
 }
 
+writeMessageMap createHsWriteMessageMap() {
+  writeMessageMap m = {
+
+    {"hvacCommand", messageDef(0x7A0, (unsigned long) 0x00, 0, 1)}
+  };
+
+  return m;
+}
+
 // Takes a value and string of a message
 // Returns a canMessage struct with an updated byte value to be written
 canMessage* WriteParse(writeMessageMap m, string name, unsigned long value) {
@@ -271,7 +285,6 @@ canMessage* WriteParse(writeMessageMap m, string name, unsigned long value) {
     c->data[i] = (unsigned char)message;
     message = message >> 8;
   }
-  // cout <<message<<endl;
   return c;
 }
 
@@ -446,8 +459,7 @@ void ProcessReadMessages(void* arg) {
         uv_mutex_lock(baton->processedReadQueueLock);
 
         for (auto it = signals.begin(); it != signals.end(); ++it) {
-            baton->processedReadQueue->push(*it);
-            printf("%s %lf\n", (*it)->name.c_str(), (*it)->value);        }
+            baton->processedReadQueue->push(*it);        }
         if (baton->processedReadQueue->size() >= 80) {
             printf("WARNING: There are %lu unfired signals\n", baton->processedReadQueue->size());
         }
@@ -581,6 +593,34 @@ Handle<Value> Write(const Arguments& args) {
 
 }
 
+Handle<Value> WriteHs(const Arguments& args) {
+
+    // All V8 functions need a scope
+    HandleScope scope;
+
+    if (args.Length() < 2) {
+      return ThrowException(Exception::TypeError(String::New("You must pass two arguments")));       
+    }
+
+    canSignal* signal = new canSignal;
+
+    String::Utf8Value param0(args[0]->ToString());
+    signal->name = std::string(*param0);    
+    signal->value = args[1]->ToInteger()->Value();
+
+    // Lock hsWriteQueue
+    uv_mutex_lock(hsWriteQueueLock);
+
+    hsWriteQueue->push(signal);
+
+    uv_mutex_unlock(hsWriteQueueLock);   
+
+    uv_cond_signal(hsWriteQueueNotEmpty);
+
+    return Undefined();
+
+}
+
 /*
     Starts up all of our threads.
     Args should contain a callback function.
@@ -619,19 +659,33 @@ Handle<Value> Start(const Arguments& args) {
     uv_async_t* processedReadAsync = new uv_async_t;
     processedReadAsync->data = (void*) processedReadAsyncBaton;
 
-    // Initialize processed write synchronization
+    // Initialize LS processed write synchronization
     queue<canMessage*>* lsProcessedWriteQueue = new queue<canMessage*>();
     uv_mutex_t* lsProcessedWriteQueueLock = new uv_mutex_t;
     uv_cond_t* lsProcessedWriteQueueNotEmpty = new uv_cond_t;
     uv_mutex_init(lsProcessedWriteQueueLock);
     uv_cond_init(lsProcessedWriteQueueNotEmpty);
 
-    // Initialize gloabl write synchronization
+    // Initialize LS gloabl write synchronization
     lsWriteQueue = new queue<canSignal*>();
     lsWriteQueueLock = new uv_mutex_t;
     lsWriteQueueNotEmpty = new uv_cond_t;
     uv_mutex_init(lsWriteQueueLock);
     uv_cond_init(lsWriteQueueNotEmpty);
+
+    // Initialize HS processed write synchronization
+    queue<canMessage*>* hsProcessedWriteQueue = new queue<canMessage*>();
+    uv_mutex_t* hsProcessedWriteQueueLock = new uv_mutex_t;
+    uv_cond_t* hsProcessedWriteQueueNotEmpty = new uv_cond_t;
+    uv_mutex_init(hsProcessedWriteQueueLock);
+    uv_cond_init(hsProcessedWriteQueueNotEmpty);
+
+    // Initialize HS gloabl write synchronization
+    hsWriteQueue = new queue<canSignal*>();
+    hsWriteQueueLock = new uv_mutex_t;
+    hsWriteQueueNotEmpty = new uv_cond_t;
+    uv_mutex_init(hsWriteQueueLock);
+    uv_cond_init(hsWriteQueueNotEmpty);
 
     // Initialize HS read baton
     canReadBaton* hsCanReadBaton = new canReadBaton;
@@ -723,6 +777,30 @@ Handle<Value> Start(const Arguments& args) {
     lsCanWriteBaton->processedWriteQueueLock = lsProcessedWriteQueueLock;
     lsCanWriteBaton->processedWriteQueueNotEmpty = lsProcessedWriteQueueNotEmpty;
 
+    // Initialize HS write process baton
+    canProcessWriteBaton* hsCanProcessWriteBaton = new canProcessWriteBaton;
+    hsCanProcessWriteBaton->messageDefinitions = createHsWriteMessageMap();
+    hsCanProcessWriteBaton->writeQueue = hsWriteQueue;
+    hsCanProcessWriteBaton->writeQueueLock = hsWriteQueueLock;
+    hsCanProcessWriteBaton->writeQueueNotEmpty = hsWriteQueueNotEmpty;
+    hsCanProcessWriteBaton->processedWriteQueue = hsProcessedWriteQueue;
+    hsCanProcessWriteBaton->processedWriteQueueLock = hsProcessedWriteQueueLock;
+    hsCanProcessWriteBaton->processedWriteQueueNotEmpty = hsProcessedWriteQueueNotEmpty;
+
+    // Initialize HS write baton
+    canWriteBaton* hsCanWriteBaton = new canWriteBaton;
+    hsCanWriteBaton->channel = HS_CHANNEL;
+    hsCanWriteBaton->baudRate = HS_BAUD;
+    hsCanWriteBaton->tseg1 = HS_TSEG1;
+    hsCanWriteBaton->tseg2 = HS_TSEG2;
+    hsCanWriteBaton->sjw = HS_SJW;
+    hsCanWriteBaton->samplePoints = HS_SAMPLE_POINTS;
+    hsCanWriteBaton->syncMode = HS_SYNC_MODE;
+    hsCanWriteBaton->canFlags = HS_FLAGS;
+    hsCanWriteBaton->processedWriteQueue = hsProcessedWriteQueue;
+    hsCanWriteBaton->processedWriteQueueLock = hsProcessedWriteQueueLock;
+    hsCanWriteBaton->processedWriteQueueNotEmpty = hsProcessedWriteQueueNotEmpty;
+
     // Initialize LS process work request
     uv_work_t* lsProcessWriteReq = new uv_work_t();
     lsProcessWriteReq->data = (void*) lsCanProcessWriteBaton;
@@ -730,6 +808,14 @@ Handle<Value> Start(const Arguments& args) {
     // Initialize LS write work request
     uv_work_t* lsWriteReq = new uv_work_t();
     lsWriteReq->data = (void*) lsCanWriteBaton;
+
+    // Initialize HS process work request
+    uv_work_t* hsProcessWriteReq = new uv_work_t();
+    hsProcessWriteReq->data = (void*) hsCanProcessWriteBaton;
+    
+    // Initialize HS write work request
+    uv_work_t* hsWriteReq = new uv_work_t();
+    hsWriteReq->data = (void*) hsCanWriteBaton;
      
     // Start all our threads        
     uv_loop_t* loop = uv_default_loop();
@@ -745,10 +831,15 @@ Handle<Value> Start(const Arguments& args) {
     uv_thread_create(&hsReadId, ReadMessages, hsCanReadBaton);
     uv_thread_create(&hsReadProcessId, ProcessReadMessages, canHsProcessReadBaton);
     
-    uv_thread_t writeProcessId;
-    uv_thread_t writeSendId;
-    uv_thread_create(&writeProcessId, ProcessWriteMessages, lsCanProcessWriteBaton);
-    uv_thread_create(&writeSendId, SendWriteMessages, lsCanWriteBaton);
+    uv_thread_t lsWriteProcessId;
+    uv_thread_t lsWriteSendId;
+    uv_thread_create(&lsWriteProcessId, ProcessWriteMessages, lsCanProcessWriteBaton);
+    uv_thread_create(&lsWriteSendId, SendWriteMessages, lsCanWriteBaton);
+    
+    uv_thread_t hsWriteProcessId;
+    uv_thread_t hsWriteSendId;
+    uv_thread_create(&hsWriteProcessId, ProcessWriteMessages, hsCanProcessWriteBaton);
+    uv_thread_create(&hsWriteSendId, SendWriteMessages, hsCanWriteBaton);
 
     return Undefined();
 }
@@ -762,6 +853,8 @@ void RegisterModule(Handle<Object> target) {
         FunctionTemplate::New(Start)->GetFunction());
     target->Set(String::NewSymbol("write"),
         FunctionTemplate::New(Write)->GetFunction());
+    target->Set(String::NewSymbol("writeHs"),
+        FunctionTemplate::New(WriteHs)->GetFunction());
 }
 
 NODE_MODULE(canReadWriter, RegisterModule);

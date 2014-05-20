@@ -15,6 +15,7 @@ var CanReadWriter = module.exports = function() {
 util.inherits(CanReadWriter, events.EventEmitter);
 
 CanReadWriter.prototype.write = canReadWriter.write;
+CanReadWriter.prototype.writeHs = canReadWriter.writeHs;
 CanReadWriter.prototype.getMail = function(address) {
     return this._mailbox[address];
 };
